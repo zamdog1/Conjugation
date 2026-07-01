@@ -1,0 +1,2041 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Conjugaison</title>
+<!-- Firebase (Cloud Firestore): powers a leaderboard that is genuinely shared over the
+     internet across every student/device, with no login required for students
+     (see FIREBASE_CONFIG + setup notes in the script below). -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --ink:#1E2A4A;
+  --ink-light:#2D3F66;
+  --parchment:#F7F3E9;
+  --parchment-dark:#EDE6D6;
+  --coral:#E94B3C;
+  --coral-light:#F2786B;
+  --gold:#C9A961;
+  --green:#4A9B6E;
+  --text-dark:#2A2A2A;
+  --text-muted:#6B6B6B;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:var(--ink);
+  background-image:radial-gradient(circle at 20% 20%, var(--ink-light) 0%, var(--ink) 60%);
+  color:var(--parchment);
+  min-height:100vh;
+  padding:24px 16px;
+}
+.app{max-width:680px;margin:0 auto;}
+.title-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:8px;}
+.title{
+  font-family:Georgia,'Times New Roman',serif;
+  font-size:32px;
+  font-weight:700;
+  letter-spacing:-0.5px;
+  color:var(--parchment);
+}
+.title .accent{color:var(--coral-light);}
+.subtitle{font-size:13px;color:rgba(247,243,233,0.6);margin-top:2px;}
+
+.name-card{
+  background:var(--parchment);
+  border-radius:14px;
+  padding:18px 20px;
+  margin-bottom:20px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.25);
+}
+.name-card input{
+  flex:1;
+  border:none;
+  border-bottom:2px solid var(--parchment-dark);
+  background:transparent;
+  font-size:16px;
+  padding:8px 4px;
+  font-family:inherit;
+  color:var(--text-dark);
+  outline:none;
+}
+.name-card input:focus{border-bottom-color:var(--coral);}
+.name-card label{font-size:13px;color:var(--text-muted);white-space:nowrap;}
+.name-card{flex-wrap:wrap;}
+.name-card .btn{padding:10px 18px;font-size:14px;}
+
+.gate-msg{
+  font-size:13px;
+  color:rgba(247,243,233,0.75);
+  text-align:center;
+  margin:-8px 0 22px;
+  padding:0 10px;
+  line-height:1.5;
+  transition:color 0.2s;
+}
+
+.stats-row{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+.stat-pill{
+  background:rgba(247,243,233,0.08);
+  border:1px solid rgba(247,243,233,0.15);
+  border-radius:10px;
+  padding:10px 14px;
+  flex:1;
+  min-width:90px;
+  text-align:center;
+}
+.stat-pill .num{font-size:22px;font-weight:700;color:var(--gold);font-family:Georgia,serif;}
+.stat-pill .lbl{font-size:11px;color:rgba(247,243,233,0.55);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;}
+
+.selector-row{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+.sel-btn{
+  background:rgba(247,243,233,0.07);
+  border:1px solid rgba(247,243,233,0.18);
+  color:var(--parchment);
+  padding:7px 11px;
+  border-radius:8px;
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.15s;
+  font-family:inherit;
+  white-space:nowrap;
+}
+.sel-btn:hover{background:rgba(247,243,233,0.14);}
+.sel-btn.active{background:var(--coral);border-color:var(--coral);color:#fff;}
+
+.card{
+  background:var(--parchment);
+  border-radius:18px;
+  padding:36px 28px;
+  box-shadow:0 12px 32px rgba(0,0,0,0.3);
+  position:relative;
+  overflow:hidden;
+}
+.card::before{
+  content:'';
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:4px;
+  background:linear-gradient(180deg,var(--coral),var(--gold));
+}
+.mood-tense-label{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1px;
+  color:var(--text-muted);
+  margin-bottom:6px;
+}
+.verb-display{
+  font-family:Georgia,'Times New Roman',serif;
+  font-size:38px;
+  font-weight:700;
+  color:var(--ink);
+  margin-bottom:4px;
+}
+.verb-meaning{
+  font-size:15px;
+  color:var(--text-muted);
+  font-style:italic;
+  margin-bottom:24px;
+}
+.prompt-row{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:18px;
+}
+.pronoun{
+  font-family:Georgia,serif;
+  font-size:24px;
+  font-weight:700;
+  color:var(--coral);
+  min-width:90px;
+  border-bottom:3px solid var(--coral);
+  padding-bottom:2px;
+}
+.answer-input{
+  flex:1;
+  font-size:20px;
+  padding:12px 14px;
+  border:2px solid var(--parchment-dark);
+  border-radius:10px;
+  font-family:inherit;
+  outline:none;
+  background:#fff;
+  color:var(--text-dark);
+}
+.answer-input:focus{border-color:var(--coral);}
+.answer-input.correct{border-color:var(--green);background:#EAF7EF;}
+.answer-input.wrong{border-color:var(--coral);background:#FDECEA;}
+
+.feedback{
+  min-height:24px;
+  font-size:14px;
+  margin-bottom:14px;
+  font-weight:600;
+}
+.feedback.correct{color:var(--green);}
+.feedback.wrong{color:var(--coral);}
+
+.btn-row{display:flex;gap:10px;}
+.btn{
+  padding:12px 22px;
+  border-radius:10px;
+  border:none;
+  font-size:15px;
+  font-weight:600;
+  cursor:pointer;
+  font-family:inherit;
+  transition:transform 0.1s;
+}
+.btn:active{transform:scale(0.97);}
+.btn-primary{background:var(--coral);color:#fff;}
+.btn-primary:hover{background:var(--coral-light);}
+.btn-secondary{background:var(--parchment-dark);color:var(--text-dark);}
+
+.leaderboard{
+  background:rgba(247,243,233,0.06);
+  border:1px solid rgba(247,243,233,0.14);
+  border-radius:14px;
+  padding:18px 20px;
+  margin-top:22px;
+}
+.lb-title{
+  font-family:Georgia,serif;
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.lb-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 0;
+  border-bottom:1px solid rgba(247,243,233,0.08);
+  font-size:14px;
+}
+.lb-row:last-child{border-bottom:none;}
+.lb-rank{
+  width:24px;
+  font-weight:700;
+  color:var(--gold);
+  font-family:Georgia,serif;
+}
+.lb-name{flex:1;color:var(--parchment);}
+.lb-score{font-weight:700;color:var(--coral-light);}
+.lb-meta{font-size:11px;color:rgba(247,243,233,0.5);}
+.empty-lb{color:rgba(247,243,233,0.5);font-size:13px;text-align:center;padding:12px 0;}
+
+@media(max-width:480px){
+  .verb-display{font-size:28px;}
+  .pronoun{font-size:19px;min-width:70px;}
+  .answer-input{font-size:17px;}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="title-row">
+    <div>
+      <div class="title">Conjugai<span class="accent">son</span></div>
+      <div class="subtitle">271 verbes vérifiés · tous les modes</div>
+    </div>
+  </div>
+
+  <div class="name-card" id="nameCard">
+    <label for="playerName">Joueur</label>
+    <input id="playerName" type="text" placeholder="Entrez votre nom pour commencer..." maxlength="20"/>
+    <button class="btn btn-primary" id="startBtn">Commencer →</button>
+  </div>
+  <div class="gate-msg" id="gateMsg">👋 Entrez votre nom ci-dessus, puis appuyez sur <strong>Commencer</strong> pour choisir un mode et un temps, et lancer la partie.</div>
+
+  <div id="gameArea" style="display:none;">
+    <div class="stats-row">
+      <div class="stat-pill"><div class="num" id="statStreak">0</div><div class="lbl">Série actuelle</div></div>
+      <div class="stat-pill"><div class="num" id="statBest">0</div><div class="lbl">Meilleure série</div></div>
+      <div class="stat-pill"><div class="num" id="statAccuracy">—</div><div class="lbl">Précision</div></div>
+    </div>
+
+    <div class="selector-row" id="moodSelector"></div>
+    <div class="selector-row" id="tenseSelector"></div>
+
+    <div class="card">
+      <div class="mood-tense-label" id="moodTenseLabel">Indicatif · Présent</div>
+      <div class="verb-display" id="verbDisplay">parler</div>
+      <div class="verb-meaning" id="verbMeaning">to speak</div>
+      <div class="prompt-row">
+        <div class="pronoun" id="pronounDisplay">je</div>
+        <input class="answer-input" id="answerInput" type="text" autocomplete="off" placeholder="tapez la réponse..."/>
+      </div>
+      <div style="font-size:12px;color:#888;min-height:16px;margin-bottom:4px;" id="pcHint"></div>
+      <div class="feedback" id="feedback"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="checkBtn">Vérifier</button>
+        <button class="btn btn-secondary" id="skipBtn">Passer →</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="leaderboard">
+    <div class="lb-title">🏆 Classement en direct <span id="lbStatus" style="font-size:11px;font-weight:400;color:rgba(247,243,233,0.55);"></span></div>
+    <div id="leaderboardList"><div class="empty-lb">Chargement...</div></div>
+  </div>
+</div>
+
+<script>
+// =====================================================================================
+// LIVE LEADERBOARD — backed by Firebase (Cloud Firestore)
+// =====================================================================================
+// This makes the leaderboard genuinely internet-connected, with NO login required for
+// students: every student, on every device, reads/writes the SAME database live.
+// Uses the same Firebase project as your other apps — just a different collection
+// ("conjugaison_leaderboard") so nothing collides with existing data.
+// =====================================================================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyByaWorFmYHKlSG0TEFBxSfZAkKh3AFc8k",
+  authDomain: "frenchverbgame.firebaseapp.com",
+  projectId: "frenchverbgame",
+  storageBucket: "frenchverbgame.firebasestorage.app",
+  messagingSenderId: "686776661432",
+  appId: "1:686776661432:web:cbd6b224d64c5c5ff00b4d"
+};
+const FIRESTORE_COLLECTION = 'conjugaison_leaderboard';
+
+function fbEncodeKey(k){ return encodeURIComponent(k).replace(/\./g, '%2E'); }
+function fbDecodeKey(k){ return decodeURIComponent(k.replace(/%2E/g, '.')); }
+
+let storageBackend = 'local'; // 'firebase' (shared, no login) | 'native' (Claude session) | 'local' (this device only)
+
+(function ensureStorage(){
+  // 1) Preferred: Firebase Firestore. Fully shared, no student login required.
+  if (FIREBASE_CONFIG.projectId && window.firebase) {
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      const db = firebase.firestore();
+      storageBackend = 'firebase';
+      window.storage = {
+        async get(key, shared){
+          const snap = await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).get();
+          if (!snap.exists) throw new Error('key not found: ' + key);
+          return { key, value: snap.data().value, shared: !!shared };
+        },
+        async set(key, value, shared){
+          await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).set({ value });
+          return { key, value, shared: !!shared };
+        },
+        async delete(key, shared){
+          await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).delete();
+          return { key, deleted: true, shared: !!shared };
+        },
+        async list(prefix, shared){
+          const snap = await db.collection(FIRESTORE_COLLECTION).get();
+          const keys = [];
+          snap.forEach(doc => {
+            const k = fbDecodeKey(doc.id);
+            if (!prefix || k.startsWith(prefix)) keys.push({ key: k });
+          });
+          return { keys, prefix: prefix || '', shared: !!shared };
+        }
+      };
+      return;
+    } catch (e) {
+      console.error('Firebase init failed, falling back', e);
+    }
+  }
+
+  // 2) If running inside a Claude session that already provides window.storage, use it.
+  if (window.storage && typeof window.storage.get === 'function') {
+    storageBackend = 'native';
+    return;
+  }
+
+  // 3) Fallback: localStorage. Works without errors, but is NOT shared across
+  // devices/students — only visible on this one browser.
+  storageBackend = 'local';
+  const PREFIX = 'conjugaison_storage__';
+  function fullKey(key){ return PREFIX + key; }
+  window.storage = {
+    async get(key, shared){
+      const raw = localStorage.getItem(fullKey(key));
+      if (raw === null) throw new Error('key not found: ' + key);
+      return { key, value: raw, shared: !!shared };
+    },
+    async set(key, value, shared){
+      localStorage.setItem(fullKey(key), value);
+      return { key, value, shared: !!shared };
+    },
+    async delete(key, shared){
+      localStorage.removeItem(fullKey(key));
+      return { key, deleted: true, shared: !!shared };
+    },
+    async list(prefix, shared){
+      const p = fullKey(prefix || '');
+      const keys = Object.keys(localStorage)
+        .filter(k => k.startsWith(p))
+        .map(k => ({ key: k.slice(PREFIX.length) }));
+      return { keys, prefix: prefix || '', shared: !!shared };
+    }
+  };
+})();
+
+// ===== BUNDLED FRENCH CONJUGATION ENGINE =====
+
+// ============================================================
+// FRENCH CONJUGATION ENGINE — REGULAR VERB RULES
+// ============================================================
+
+const P = ['je','tu','il','nous','vous','ils']; // il=il/elle/on, ils=ils/elles
+
+function lastChar(s){ return s.slice(-1); }
+function isNousVous(i){ return i===3||i===4; }
+
+// ---- Regular -ER (with spelling-change subpatterns) ----
+function erStem(inf, pattern, i){
+  const r = inf.slice(0,-2); // remove "er"
+  switch(pattern){
+    case 'ger': // manger -> nous mangeons (keep soft g)
+      return (i===3) ? r+'e' : r;
+    case 'cer': // commencer -> nous commençons
+      return (i===3) ? r.slice(0,-1)+'ç' : r;
+    case 'e_er': // acheter -> j'achète: last vowel 'e' (2nd-to-last char of radical) becomes 'è'
+      return isNousVous(i) ? r : r.slice(0,-2)+'è'+r.slice(-1);
+    case 'ee_er': // préférer -> je préfère: same mutation, the é before final consonant becomes è
+      return isNousVous(i) ? r : r.slice(0,-2)+'è'+r.slice(-1);
+    case 'eler_dbl': // appeler -> j'appelle
+      return isNousVous(i) ? r : r+lastChar(r);
+    case 'eter_dbl': // jeter -> je jette
+      return isNousVous(i) ? r : r+lastChar(r);
+    case 'yer': // payer/employer/essuyer -> y->i except nous/vous
+      return isNousVous(i) ? r : r.slice(0,-1)+'i';
+    case 'ayer_opt': // payer also allows keeping y; we use the i-form (more standard taught form)
+      return isNousVous(i) ? r : r.slice(0,-1)+'i';
+    default:
+      return r;
+  }
+}
+// futur/conditionnel stem for -er verbs (infinitive minus nothing for -er, but é_er reverts to é in futur/cond)
+function erFuturStem(inf, pattern){
+  const r = inf.slice(0,-1); // "parler" -> "parler" minus final 'r'? No: futur stem = infinitive itself for -er/-ir
+  return inf; // base infinitive used as futur/cond stem for -er and -ir verbs
+}
+
+const END = {
+  presER: ['e','es','e','ons','ez','ent'],
+  presIR: ['is','is','it','issons','issez','issent'],
+  presRE: ['s','s','','ons','ez','ent'],
+  imp: ['ais','ais','ait','ions','iez','aient'],
+  fut: ['ai','as','a','ons','ez','ont'],
+  cond: ['ais','ais','ait','ions','iez','aient'],
+  psER: ['ai','as','a','âmes','âtes','èrent'],
+  psIR: ['is','is','it','îmes','îtes','irent'],
+  psU: ['us','us','ut','ûmes','ûtes','urent'],
+  subjPres: ['e','es','e','ions','iez','ent'],
+  subjImp: ['sse','sses',"^t",'ssions','ssiez','ssent'], // ^t = stem ends with circumflex+t, handled specially
+  impv: ['','ons','ez'], // tu, nous, vous
+};
+
+function conjugateRegularER(inf, pattern, tense){
+  const radical = inf.slice(0,-2);
+  const out = [];
+  for(let i=0;i<6;i++){
+    let stem = erStem(inf, pattern, i);
+    if(tense==='present') out.push(stem+END.presER[i]);
+    else if(tense==='imparfait'){
+      let impStem = (pattern==='ger' && i!==3 && i!==4) ? radical+'e' : (pattern==='cer' && i!==3 && i!==4) ? radical.slice(0,-1)+'ç' : radical;
+      out.push(impStem+END.imp[i]);
+    }
+    else if(tense==='futur'){
+      const futStem = (pattern==='e_er') ? radical.slice(0,-2)+'è'+lastChar(radical)+'er'
+                     : (pattern==='eler_dbl') ? radical+lastChar(radical)+'er'
+                     : (pattern==='eter_dbl') ? radical+lastChar(radical)+'er'
+                     : inf;
+      out.push(futStem+END.fut[i]);
+    }
+    else if(tense==='conditionnel'){
+      const condStem = (pattern==='e_er') ? radical.slice(0,-2)+'è'+lastChar(radical)+'er'
+                     : (pattern==='eler_dbl') ? radical+lastChar(radical)+'er'
+                     : (pattern==='eter_dbl') ? radical+lastChar(radical)+'er'
+                     : inf;
+      out.push(condStem+END.cond[i]);
+    }
+    else if(tense==='subjPresent'){
+      // subjunctive present uses same stem-change rule as indicative present (mostly), nous/vous like imparfait stem
+      let sStem = isNousVous(i) ? radical : stem;
+      out.push(sStem+END.subjPres[i]);
+    }
+  }
+  return out;
+}
+
+function conjugateRegularIR(inf, tense){
+  const radical = inf.slice(0,-2); // remove "ir"
+  const out = [];
+  for(let i=0;i<6;i++){
+    if(tense==='present') out.push(radical+END.presIR[i]);
+    else if(tense==='imparfait') out.push(radical+'iss'+END.imp[i]);
+    else if(tense==='futur') out.push(inf+END.fut[i]);
+    else if(tense==='conditionnel') out.push(inf+END.cond[i]);
+    else if(tense==='passeSimple') out.push(radical+END.psIR[i]);
+    else if(tense==='subjPresent') out.push(radical+'iss'+END.subjPres[i]);
+  }
+  return out;
+}
+
+function conjugateRegularRE(inf, tense){
+  const radical = inf.slice(0,-2); // remove "re"
+  const out = [];
+  for(let i=0;i<6;i++){
+    if(tense==='present') out.push(radical+END.presRE[i]);
+    else if(tense==='imparfait') out.push(radical+END.imp[i]);
+    else if(tense==='futur') out.push(inf.slice(0,-1)+END.fut[i]); // -re verbs: drop final 'e' -> vendr+ai
+    else if(tense==='conditionnel') out.push(inf.slice(0,-1)+END.cond[i]);
+    else if(tense==='passeSimple') out.push(radical+END.psIR[i]);
+    else if(tense==='subjPresent') out.push(radical+END.subjPres[i]);
+  }
+  return out;
+}
+
+
+
+// ============================================================
+// IRREGULAR VERB ARCHETYPES — explicit verified conjugations
+// Each archetype defines stems per tense; derived verbs reuse pattern
+// with their own prefix where applicable (e.g. revenir = re+venir)
+// ============================================================
+
+// Format: { present, imparfaitStem, futurStem, psStem (passé simple), pp (past participle), subjPresStem }
+// imparfait always uses standard endings: ais,ais,ait,ions,iez,aient on imparfaitStem
+// futur/cond always uses standard endings ai,as,a,ons,ez,ont / ais,ais,ait,ions,iez,aient on futurStem
+
+const IRREGULAR = {
+  etre: {
+    present: ['suis','es','est','sommes','êtes','sont'],
+    imparfaitStem: 'ét',
+    futurStem: 'ser',
+    ps: ['fus','fus','fut','fûmes','fûtes','furent'],
+    pp: 'été',
+    subjPres: ['sois','sois','soit','soyons','soyez','soient'],
+    impv: ['sois','soyons','soyez'],
+  },
+  avoir: {
+    present: ['ai','as','a','avons','avez','ont'],
+    imparfaitStem: 'av',
+    futurStem: 'aur',
+    ps: ['eus','eus','eut','eûmes','eûtes','eurent'],
+    pp: 'eu',
+    subjPres: ['aie','aies','ait','ayons','ayez','aient'],
+    impv: ['aie','ayons','ayez'],
+  },
+  aller: {
+    present: ['vais','vas','va','allons','allez','vont'],
+    imparfaitStem: 'all',
+    futurStem: 'ir',
+    ps: ['allai','allas','alla','allâmes','allâtes','allèrent'],
+    pp: 'allé',
+    subjPres: ['aille','ailles','aille','allions','alliez','aillent'],
+    impv: ['va','allons','allez'],
+    aux: 'etre',
+  },
+  faire: {
+    present: ['fais','fais','fait','faisons','faites','font'],
+    imparfaitStem: 'fais',
+    futurStem: 'fer',
+    ps: ['fis','fis','fit','fîmes','fîtes','firent'],
+    pp: 'fait',
+    subjPres: ['fasse','fasses','fasse','fassions','fassiez','fassent'],
+    impv: ['fais','faisons','faites'],
+  },
+  pouvoir: {
+    present: ['peux','peux','peut','pouvons','pouvez','peuvent'],
+    imparfaitStem: 'pouv',
+    futurStem: 'pourr',
+    ps: ['pus','pus','put','pûmes','pûtes','purent'],
+    pp: 'pu',
+    subjPres: ['puisse','puisses','puisse','puissions','puissiez','puissent'],
+    impv: null, // rarely used
+  },
+  vouloir: {
+    present: ['veux','veux','veut','voulons','voulez','veulent'],
+    imparfaitStem: 'voul',
+    futurStem: 'voudr',
+    ps: ['voulus','voulus','voulut','voulûmes','voulûtes','voulurent'],
+    pp: 'voulu',
+    subjPres: ['veuille','veuilles','veuille','voulions','vouliez','veuillent'],
+    impv: ['veuille','veuillons','veuillez'],
+  },
+  devoir: {
+    present: ['dois','dois','doit','devons','devez','doivent'],
+    imparfaitStem: 'dev',
+    futurStem: 'devr',
+    ps: ['dus','dus','dut','dûmes','dûtes','durent'],
+    pp: 'dû',
+    subjPres: ['doive','doives','doive','devions','deviez','doivent'],
+    impv: null,
+  },
+  savoir: {
+    present: ['sais','sais','sait','savons','savez','savent'],
+    imparfaitStem: 'sav',
+    futurStem: 'saur',
+    ps: ['sus','sus','sut','sûmes','sûtes','surent'],
+    pp: 'su',
+    subjPres: ['sache','saches','sache','sachions','sachiez','sachent'],
+    impv: ['sache','sachons','sachez'],
+  },
+  venir: {
+    present: ['viens','viens','vient','venons','venez','viennent'],
+    imparfaitStem: 'ven',
+    futurStem: 'viendr',
+    ps: ['vins','vins','vint','vînmes','vîntes','vinrent'],
+    pp: 'venu',
+    subjPres: ['vienne','viennes','vienne','venions','veniez','viennent'],
+    impv: ['viens','venons','venez'],
+    aux: 'etre',
+  },
+  tenir: {
+    present: ['tiens','tiens','tient','tenons','tenez','tiennent'],
+    imparfaitStem: 'ten',
+    futurStem: 'tiendr',
+    ps: ['tins','tins','tint','tînmes','tîntes','tinrent'],
+    pp: 'tenu',
+    subjPres: ['tienne','tiennes','tienne','tenions','teniez','tiennent'],
+    impv: ['tiens','tenons','tenez'],
+  },
+  prendre: {
+    present: ['prends','prends','prend','prenons','prenez','prennent'],
+    imparfaitStem: 'pren',
+    futurStem: 'prendr',
+    ps: ['pris','pris','prit','prîmes','prîtes','prirent'],
+    pp: 'pris',
+    subjPres: ['prenne','prennes','prenne','prenions','preniez','prennent'],
+    impv: ['prends','prenons','prenez'],
+  },
+  mettre: {
+    present: ['mets','mets','met','mettons','mettez','mettent'],
+    imparfaitStem: 'mett',
+    futurStem: 'mettr',
+    ps: ['mis','mis','mit','mîmes','mîtes','mirent'],
+    pp: 'mis',
+    subjPres: ['mette','mettes','mette','mettions','mettiez','mettent'],
+    impv: ['mets','mettons','mettez'],
+  },
+  voir: {
+    present: ['vois','vois','voit','voyons','voyez','voient'],
+    imparfaitStem: 'voy',
+    futurStem: 'verr',
+    ps: ['vis','vis','vit','vîmes','vîtes','virent'],
+    pp: 'vu',
+    subjPres: ['voie','voies','voie','voyions','voyiez','voient'],
+    impv: ['vois','voyons','voyez'],
+  },
+  croire: {
+    present: ['crois','crois','croit','croyons','croyez','croient'],
+    imparfaitStem: 'croy',
+    futurStem: 'croir',
+    ps: ['crus','crus','crut','crûmes','crûtes','crurent'],
+    pp: 'cru',
+    subjPres: ['croie','croies','croie','croyions','croyiez','croient'],
+    impv: ['crois','croyons','croyez'],
+  },
+  dire: {
+    present: ['dis','dis','dit','disons','dites','disent'],
+    imparfaitStem: 'dis',
+    futurStem: 'dir',
+    ps: ['dis','dis','dit','dîmes','dîtes','dirent'],
+    pp: 'dit',
+    subjPres: ['dise','dises','dise','disions','disiez','disent'],
+    impv: ['dis','disons','dites'],
+  },
+  écrire: {
+    present: ['écris','écris','écrit','écrivons','écrivez','écrivent'],
+    imparfaitStem: 'écriv',
+    futurStem: 'écrir',
+    ps: ['écrivis','écrivis','écrivit','écrivîmes','écrivîtes','écrivirent'],
+    pp: 'écrit',
+    subjPres: ['écrive','écrives','écrive','écrivions','écriviez','écrivent'],
+    impv: ['écris','écrivons','écrivez'],
+  },
+  lire: {
+    present: ['lis','lis','lit','lisons','lisez','lisent'],
+    imparfaitStem: 'lis',
+    futurStem: 'lir',
+    ps: ['lus','lus','lut','lûmes','lûtes','lurent'],
+    pp: 'lu',
+    subjPres: ['lise','lises','lise','lisions','lisiez','lisent'],
+    impv: ['lis','lisons','lisez'],
+  },
+  boire: {
+    present: ['bois','bois','boit','buvons','buvez','boivent'],
+    imparfaitStem: 'buv',
+    futurStem: 'boir',
+    ps: ['bus','bus','but','bûmes','bûtes','burent'],
+    pp: 'bu',
+    subjPres: ['boive','boives','boive','buvions','buviez','boivent'],
+    impv: ['bois','buvons','buvez'],
+  },
+  connaître: {
+    present: ['connais','connais','connaît','connaissons','connaissez','connaissent'],
+    imparfaitStem: 'connaiss',
+    futurStem: 'connaîtr',
+    ps: ['connus','connus','connut','connûmes','connûtes','connurent'],
+    pp: 'connu',
+    subjPres: ['connaisse','connaisses','connaisse','connaissions','connaissiez','connaissent'],
+    impv: ['connais','connaissons','connaissez'],
+  },
+  naître: {
+    present: ['nais','nais','naît','naissons','naissez','naissent'],
+    imparfaitStem: 'naiss',
+    futurStem: 'naîtr',
+    ps: ['naquis','naquis','naquit','naquîmes','naquîtes','naquirent'],
+    pp: 'né',
+    subjPres: ['naisse','naisses','naisse','naissions','naissiez','naissent'],
+    impv: ['nais','naissons','naissez'],
+    aux: 'etre',
+  },
+  partir: {
+    present: ['pars','pars','part','partons','partez','partent'],
+    imparfaitStem: 'part',
+    futurStem: 'partir',
+    ps: ['partis','partis','partit','partîmes','partîtes','partirent'],
+    pp: 'parti',
+    subjPres: ['parte','partes','parte','partions','partiez','partent'],
+    impv: ['pars','partons','partez'],
+    aux: 'etre',
+  },
+  sortir: {
+    present: ['sors','sors','sort','sortons','sortez','sortent'],
+    imparfaitStem: 'sort',
+    futurStem: 'sortir',
+    ps: ['sortis','sortis','sortit','sortîmes','sortîtes','sortirent'],
+    pp: 'sorti',
+    subjPres: ['sorte','sortes','sorte','sortions','sortiez','sortent'],
+    impv: ['sors','sortons','sortez'],
+    aux: 'etre',
+  },
+  dormir: {
+    present: ['dors','dors','dort','dormons','dormez','dorment'],
+    imparfaitStem: 'dorm',
+    futurStem: 'dormir',
+    ps: ['dormis','dormis','dormit','dormîmes','dormîtes','dormirent'],
+    pp: 'dormi',
+    subjPres: ['dorme','dormes','dorme','dormions','dormiez','dorment'],
+    impv: ['dors','dormons','dormez'],
+  },
+  sentir: {
+    present: ['sens','sens','sent','sentons','sentez','sentent'],
+    imparfaitStem: 'sent',
+    futurStem: 'sentir',
+    ps: ['sentis','sentis','sentit','sentîmes','sentîtes','sentirent'],
+    pp: 'senti',
+    subjPres: ['sente','sentes','sente','sentions','sentiez','sentent'],
+    impv: ['sens','sentons','sentez'],
+  },
+  ouvrir: {
+    present: ['ouvre','ouvres','ouvre','ouvrons','ouvrez','ouvrent'],
+    imparfaitStem: 'ouvr',
+    futurStem: 'ouvrir',
+    ps: ['ouvris','ouvris','ouvrit','ouvrîmes','ouvrîtes','ouvrirent'],
+    pp: 'ouvert',
+    subjPres: ['ouvre','ouvres','ouvre','ouvrions','ouvriez','ouvrent'],
+    impv: ['ouvre','ouvrons','ouvrez'],
+  },
+  offrir: {
+    present: ['offre','offres','offre','offrons','offrez','offrent'],
+    imparfaitStem: 'offr',
+    futurStem: 'offrir',
+    ps: ['offris','offris','offrit','offrîmes','offrîtes','offrirent'],
+    pp: 'offert',
+    subjPres: ['offre','offres','offre','offrions','offriez','offrent'],
+    impv: ['offre','offrons','offrez'],
+  },
+  courir: {
+    present: ['cours','cours','court','courons','courez','courent'],
+    imparfaitStem: 'cour',
+    futurStem: 'courr',
+    ps: ['courus','courus','courut','courûmes','courûtes','coururent'],
+    pp: 'couru',
+    subjPres: ['coure','coures','coure','courions','couriez','courent'],
+    impv: ['cours','courons','courez'],
+  },
+  mourir: {
+    present: ['meurs','meurs','meurt','mourons','mourez','meurent'],
+    imparfaitStem: 'mour',
+    futurStem: 'mourr',
+    ps: ['mourus','mourus','mourut','mourûmes','mourûtes','moururent'],
+    pp: 'mort',
+    subjPres: ['meure','meures','meure','mourions','mouriez','meurent'],
+    impv: ['meurs','mourons','mourez'],
+    aux: 'etre',
+  },
+  recevoir: {
+    present: ['reçois','reçois','reçoit','recevons','recevez','reçoivent'],
+    imparfaitStem: 'recev',
+    futurStem: 'recevr',
+    ps: ['reçus','reçus','reçut','reçûmes','reçûtes','reçurent'],
+    pp: 'reçu',
+    subjPres: ['reçoive','reçoives','reçoive','recevions','receviez','reçoivent'],
+    impv: ['reçois','recevons','recevez'],
+  },
+  voir2_apercevoir: null, // not used, placeholder removed
+  envoyer: {
+    present: ['envoie','envoies','envoie','envoyons','envoyez','envoient'],
+    imparfaitStem: 'envoy',
+    futurStem: 'enverr',
+    ps: ['envoyai','envoyas','envoya','envoyâmes','envoyâtes','envoyèrent'],
+    pp: 'envoyé',
+    subjPres: ['envoie','envoies','envoie','envoyions','envoyiez','envoient'],
+    impv: ['envoie','envoyons','envoyez'],
+  },
+  rire: {
+    present: ['ris','ris','rit','rions','riez','rient'],
+    imparfaitStem: 'ri',
+    futurStem: 'rir',
+    ps: ['ris','ris','rit','rîmes','rîtes','rirent'],
+    pp: 'ri',
+    subjPres: ['rie','ries','rie','riions','riiez','rient'],
+    impv: ['ris','rions','riez'],
+  },
+  suivre: {
+    present: ['suis','suis','suit','suivons','suivez','suivent'],
+    imparfaitStem: 'suiv',
+    futurStem: 'suivr',
+    ps: ['suivis','suivis','suivit','suivîmes','suivîtes','suivirent'],
+    pp: 'suivi',
+    subjPres: ['suive','suives','suive','suivions','suiviez','suivent'],
+    impv: ['suis','suivons','suivez'],
+  },
+  vivre: {
+    present: ['vis','vis','vit','vivons','vivez','vivent'],
+    imparfaitStem: 'viv',
+    futurStem: 'vivr',
+    ps: ['vécus','vécus','vécut','vécûmes','vécûtes','vécurent'],
+    pp: 'vécu',
+    subjPres: ['vive','vives','vive','vivions','viviez','vivent'],
+    impv: ['vis','vivons','vivez'],
+  },
+  conduire: {
+    present: ['conduis','conduis','conduit','conduisons','conduisez','conduisent'],
+    imparfaitStem: 'conduis',
+    futurStem: 'conduir',
+    ps: ['conduisis','conduisis','conduisit','conduisîmes','conduisîtes','conduisirent'],
+    pp: 'conduit',
+    subjPres: ['conduise','conduises','conduise','conduisions','conduisiez','conduisent'],
+    impv: ['conduis','conduisons','conduisez'],
+  },
+  craindre: {
+    present: ['crains','crains','craint','craignons','craignez','craignent'],
+    imparfaitStem: 'craign',
+    futurStem: 'craindr',
+    ps: ['craignis','craignis','craignit','craignîmes','craignîtes','craignirent'],
+    pp: 'craint',
+    subjPres: ['craigne','craignes','craigne','craignions','craigniez','craignent'],
+    impv: ['crains','craignons','craignez'],
+  },
+  peindre: {
+    present: ['peins','peins','peint','peignons','peignez','peignent'],
+    imparfaitStem: 'peign',
+    futurStem: 'peindr',
+    ps: ['peignis','peignis','peignit','peignîmes','peignîtes','peignirent'],
+    pp: 'peint',
+    subjPres: ['peigne','peignes','peigne','peignions','peigniez','peignent'],
+    impv: ['peins','peignons','peignez'],
+  },
+  joindre: {
+    present: ['joins','joins','joint','joignons','joignez','joignent'],
+    imparfaitStem: 'joign',
+    futurStem: 'joindr',
+    ps: ['joignis','joignis','joignit','joignîmes','joignîtes','joignirent'],
+    pp: 'joint',
+    subjPres: ['joigne','joignes','joigne','joignions','joigniez','joignent'],
+    impv: ['joins','joignons','joignez'],
+  },
+  battre: {
+    present: ['bats','bats','bat','battons','battez','battent'],
+    imparfaitStem: 'batt',
+    futurStem: 'battr',
+    ps: ['battis','battis','battit','battîmes','battîtes','battirent'],
+    pp: 'battu',
+    subjPres: ['batte','battes','batte','battions','battiez','battent'],
+    impv: ['bats','battons','battez'],
+  },
+  rompre: {
+    present: ['romps','romps','rompt','rompons','rompez','rompent'],
+    imparfaitStem: 'romp',
+    futurStem: 'rompr',
+    ps: ['rompis','rompis','rompit','rompîmes','rompîtes','rompirent'],
+    pp: 'rompu',
+    subjPres: ['rompe','rompes','rompe','rompions','rompiez','rompent'],
+    impv: ['romps','rompons','rompez'],
+  },
+  plaire: {
+    present: ['plais','plais','plaît','plaisons','plaisez','plaisent'],
+    imparfaitStem: 'plais',
+    futurStem: 'plair',
+    ps: ['plus','plus','plut','plûmes','plûtes','plurent'],
+    pp: 'plu',
+    subjPres: ['plaise','plaises','plaise','plaisions','plaisiez','plaisent'],
+    impv: ['plais','plaisons','plaisez'],
+  },
+  falloir: { // impersonal only (il form)
+    present: [null,null,'faut',null,null,null],
+    imparfaitStem: 'fall',
+    futurStem: 'faudr',
+    ps: [null,null,'fallut',null,null,null],
+    pp: 'fallu',
+    subjPres: [null,null,'faille',null,null,null],
+    impv: null,
+    impersonal: true,
+  },
+  pleuvoir: { // impersonal only
+    present: [null,null,'pleut',null,null,null],
+    imparfaitStem: 'pleuv',
+    futurStem: 'pleuvr',
+    ps: [null,null,'plut',null,null,null],
+    pp: 'plu',
+    subjPres: [null,null,'pleuve',null,null,null],
+    impv: null,
+    impersonal: true,
+  },
+  valoir: {
+    present: ['vaux','vaux','vaut','valons','valez','valent'],
+    imparfaitStem: 'val',
+    futurStem: 'vaudr',
+    ps: ['valus','valus','valut','valûmes','valûtes','valurent'],
+    pp: 'valu',
+    subjPres: ['vaille','vailles','vaille','valions','valiez','vaillent'],
+    impv: ['vaux','valons','valez'],
+  },
+  plaindre: {
+    present: ['plains','plains','plaint','plaignons','plaignez','plaignent'],
+    imparfaitStem: 'plaign',
+    futurStem: 'plaindr',
+    ps: ['plaignis','plaignis','plaignit','plaignîmes','plaignîtes','plaignirent'],
+    pp: 'plaint',
+    subjPres: ['plaigne','plaignes','plaigne','plaignions','plaigniez','plaignent'],
+    impv: ['plains','plaignons','plaignez'],
+  },
+  construire: {
+    present: ['construis','construis','construit','construisons','construisez','construisent'],
+    imparfaitStem: 'construis',
+    futurStem: 'construir',
+    ps: ['construisis','construisis','construisit','construisîmes','construisîtes','construisirent'],
+    pp: 'construit',
+    subjPres: ['construise','construises','construise','construisions','construisiez','construisent'],
+    impv: ['construis','construisons','construisez'],
+  },
+  détruire: {
+    present: ['détruis','détruis','détruit','détruisons','détruisez','détruisent'],
+    imparfaitStem: 'détruis',
+    futurStem: 'détruir',
+    ps: ['détruisis','détruisis','détruisit','détruisîmes','détruisîtes','détruisirent'],
+    pp: 'détruit',
+    subjPres: ['détruise','détruises','détruise','détruisions','détruisiez','détruisent'],
+    impv: ['détruis','détruisons','détruisez'],
+  },
+  traduire: {
+    present: ['traduis','traduis','traduit','traduisons','traduisez','traduisent'],
+    imparfaitStem: 'traduis',
+    futurStem: 'traduir',
+    ps: ['traduisis','traduisis','traduisit','traduisîmes','traduisîtes','traduisirent'],
+    pp: 'traduit',
+    subjPres: ['traduise','traduises','traduise','traduisions','traduisiez','traduisent'],
+    impv: ['traduis','traduisons','traduisez'],
+  },
+  apercevoir: {
+    present: ['aperçois','aperçois','aperçoit','apercevons','apercevez','aperçoivent'],
+    imparfaitStem: 'apercev',
+    futurStem: 'apercevr',
+    ps: ['aperçus','aperçus','aperçut','aperçûmes','aperçûtes','aperçurent'],
+    pp: 'aperçu',
+    subjPres: ['aperçoive','aperçoives','aperçoive','apercevions','aperceviez','aperçoivent'],
+    impv: ['aperçois','apercevons','apercevez'],
+  },
+  servir: {
+    present: ['sers','sers','sert','servons','servez','servent'],
+    imparfaitStem: 'serv',
+    futurStem: 'servir',
+    ps: ['servis','servis','servit','servîmes','servîtes','servirent'],
+    pp: 'servi',
+    subjPres: ['serve','serves','serve','servions','serviez','servent'],
+    impv: ['sers','servons','servez'],
+  },
+  souffrir: {
+    present: ['souffre','souffres','souffre','souffrons','souffrez','souffrent'],
+    imparfaitStem: 'souffr',
+    futurStem: 'souffrir',
+    ps: ['souffris','souffris','souffrit','souffrîmes','souffrîtes','souffrirent'],
+    pp: 'souffert',
+    subjPres: ['souffre','souffres','souffre','souffrions','souffriez','souffrent'],
+    impv: ['souffre','souffrons','souffrez'],
+  },
+};
+
+delete IRREGULAR.voir2_apercevoir;
+
+
+
+// ============================================================
+// MASTER CONJUGATOR — combines regular rules + irregular tables
+// Handles reflexive pronoun logic and compound tenses
+// ============================================================
+
+const SUBJ = ['je','tu','il','nous','vous','ils'];
+const REFL = ['me','te','se','nous','vous','se'];
+
+function startsVowel(s){ return /^[aeiouhâàéèêëîïôöùûü]/i.test(s); }
+
+// Build standard endings reused for irregular imparfait/futur/cond
+const IMP_END = ['ais','ais','ait','ions','iez','aient'];
+const FUT_END = ['ai','as','a','ons','ez','ont'];
+
+function conjugateIrregular(verbEntry, tense){
+  const arc = IRREGULAR[verbEntry.archetype];
+  if(!arc) return null;
+  const prefix = verbEntry.prefix || '';
+  const out = [];
+  for(let i=0;i<6;i++){
+    let form;
+    if(tense==='present') form = arc.present[i];
+    else if(tense==='imparfait') form = arc.imparfaitStem===null?null:arc.imparfaitStem+IMP_END[i];
+    else if(tense==='futur') form = arc.futurStem===null?null:arc.futurStem+FUT_END[i];
+    else if(tense==='conditionnel') form = arc.futurStem===null?null:arc.futurStem+IMP_END[i];
+    else if(tense==='passeSimple') form = arc.ps[i];
+    else if(tense==='subjPresent') form = arc.subjPres[i];
+    out.push(form===null||form===undefined ? null : prefix+form);
+  }
+  return out;
+}
+
+// Main entry: conjugate a verb entry for a given tense, returns array of 6 forms (or fewer if impersonal)
+function conjugate(verbEntry, tense){
+  let forms;
+  if(verbEntry.group==='irregular'){
+    forms = conjugateIrregular(verbEntry, tense);
+  } else if(verbEntry.group==='er'){
+    forms = conjugateRegularER(verbEntry.inf, verbEntry.pattern||'standard', tense);
+  } else if(verbEntry.group==='ir'){
+    forms = conjugateRegularIR(verbEntry.inf, tense);
+  } else if(verbEntry.group==='re'){
+    forms = conjugateRegularRE(verbEntry.inf, tense);
+  }
+  if(!forms) return null;
+
+  // Apply reflexive pronouns if needed
+  if(verbEntry.reflexive){
+    forms = forms.map((f,i)=>{
+      if(f===null) return null;
+      const pron = REFL[i];
+      if(pron==='me' && startsVowel(f)) return "m'"+f;
+      if(pron==='te' && startsVowel(f)) return "t'"+f;
+      if(pron==='se' && startsVowel(f)) return "s'"+f;
+      return pron+' '+f;
+    });
+  }
+  return forms;
+}
+
+// Build full subject+verb display string, e.g. "je parle" / "je m'appelle"
+function fullForm(verbEntry, tense, personIndex, subjOverride){
+  const forms = conjugate(verbEntry, tense);
+  if(!forms || forms[personIndex]===null) return null;
+  const subjLabels = ['je','tu','il','nous','vous','ils'];
+  let subj = subjOverride !== undefined ? subjOverride : subjLabels[personIndex];
+  let verbPart = forms[personIndex];
+  if(personIndex===0 && !verbEntry.reflexive && startsVowel(verbPart)){
+    return "j'"+verbPart;
+  }
+  return subj+' '+verbPart;
+}
+
+
+
+// ============================================================
+// PASSÉ COMPOSÉ — auxiliary + past participle, with agreement
+// ============================================================
+
+const AVOIR_PRES  = ['ai','as','a','avons','avez','ont'];
+const ETRE_PRES   = ['suis','es','est','sommes','êtes','sont'];
+const AVOIR_IMP   = ['avais','avais','avait','avions','aviez','avaient'];
+const ETRE_IMP    = ['étais','étais','était','étions','étiez','étaient'];
+const AVOIR_FUT   = ['aurai','auras','aura','aurons','aurez','auront'];
+const ETRE_FUT    = ['serai','seras','sera','serons','serez','seront'];
+const AVOIR_COND  = ['aurais','aurais','aurait','aurions','auriez','auraient'];
+const ETRE_COND   = ['serais','serais','serait','serions','seriez','seraient'];
+const AVOIR_SUBJ  = ['aie','aies','ait','ayons','ayez','aient'];
+const ETRE_SUBJ   = ['sois','sois','soit','soyons','soyez','soient'];
+
+// Regular past participles derived from infinitive
+function regularPP(verbEntry){
+  if(verbEntry.group==='er') return verbEntry.inf.slice(0,-2)+'é';
+  if(verbEntry.group==='ir') return verbEntry.inf.slice(0,-2)+'i';
+  if(verbEntry.group==='re') return verbEntry.inf.slice(0,-2)+'u'; // most regular -re verbs: vendu, attendu, perdu, répondu
+  return null;
+}
+
+function getPastParticiple(verbEntry){
+  if(verbEntry.group==='irregular'){
+    const arc = IRREGULAR[verbEntry.archetype];
+    const prefix = verbEntry.prefix || '';
+    return arc ? prefix+arc.pp : null;
+  }
+  return regularPP(verbEntry);
+}
+
+// Agreement suffix for être verbs (or reflexive with direct object agreement - simplified to standard subject agreement)
+// i: 0=je,1=tu,2=il,3=nous,4=vous,5=ils — gender unknown by default, so we offer masculine singular/plural as default
+// teaching tool: show agreement note rather than forcing a specific gender
+function ppAgreement(pp, personIndex, gender){
+  // gender: 'm' or 'f', default 'm'
+  let suffix = '';
+  const isPlural = (personIndex===3 || personIndex===5); // nous/ils treated as plural; vous ambiguous-> treat singular by default
+  if(gender==='f') suffix += 'e';
+  if(isPlural) suffix += 's';
+  return pp+suffix;
+}
+
+// Generic compound tense builder: auxArray (avoir or être conjugated in some tense) + pp
+function buildCompound(verbEntry, personIndex, gender, avoirArr, etreArr){
+  gender = gender || 'm';
+  const pp = getPastParticiple(verbEntry);
+  if(!pp) return null;
+  const usesEtre = verbEntry.aux==='etre' || verbEntry.reflexive;
+  const auxForm = usesEtre ? etreArr[personIndex] : avoirArr[personIndex];
+
+  if(verbEntry.reflexive){
+    const REFL = ['me','te','se','nous','vous','se'];
+    const pron = REFL[personIndex];
+    const pronPart = /^[aeiouhâàéèêëîïôöùûü]/i.test(auxForm) && (pron==='me'||pron==='te'||pron==='se')
+      ? pron.charAt(0)+"'" : pron+' ';
+    return pronPart+auxForm+' '+ppAgreement(pp, personIndex, gender);
+  }
+  const agreedPP = usesEtre ? ppAgreement(pp, personIndex, gender) : pp;
+  return auxForm+' '+agreedPP;
+}
+
+// Passé composé: auxiliary in présent
+function passeCompose(verbEntry, personIndex, gender){
+  return buildCompound(verbEntry, personIndex, gender, AVOIR_PRES, ETRE_PRES);
+}
+// Plus-que-parfait: auxiliary in imparfait
+function plusQueParfait(verbEntry, personIndex, gender){
+  return buildCompound(verbEntry, personIndex, gender, AVOIR_IMP, ETRE_IMP);
+}
+// Futur antérieur: auxiliary in futur
+function futurAnterieur(verbEntry, personIndex, gender){
+  return buildCompound(verbEntry, personIndex, gender, AVOIR_FUT, ETRE_FUT);
+}
+// Conditionnel passé: auxiliary in conditionnel
+function conditionnelPasse(verbEntry, personIndex, gender){
+  return buildCompound(verbEntry, personIndex, gender, AVOIR_COND, ETRE_COND);
+}
+// Subjonctif passé: auxiliary in subjonctif présent
+function subjonctifPasse(verbEntry, personIndex, gender){
+  return buildCompound(verbEntry, personIndex, gender, AVOIR_SUBJ, ETRE_SUBJ);
+}
+
+// Impératif présent: only tu(0)/nous(1)/vous(2) — maps to personIndex 1,3,4 in normal scheme
+// We expose imperatifIdx: 0=tu, 1=nous, 2=vous
+function imperatif(verbEntry, imperatifIdx){
+  if(verbEntry.group==='irregular'){
+    const arc = IRREGULAR[verbEntry.archetype];
+    if(!arc || !arc.impv) return null;
+    if(arc.impv[imperatifIdx]===null) return null;
+    const prefix = verbEntry.prefix || '';
+    return prefix + arc.impv[imperatifIdx];
+  }
+  if(verbEntry.group==='er'){
+    // regular -er: tu=parle(no s), nous=parlons, vous=parlez
+    const radical = verbEntry.inf.slice(0,-2);
+    const ends = ['e','ons','ez'];
+    // spelling changes for nous/vous only for ger/cer
+    if(verbEntry.pattern==='ger' && imperatifIdx===1) return radical+'e'+'ons';
+    if(verbEntry.pattern==='cer' && imperatifIdx===1) return radical.slice(0,-1)+'ç'+'ons';
+    return radical + ends[imperatifIdx];
+  }
+  if(verbEntry.group==='ir'){
+    const radical = verbEntry.inf.slice(0,-2);
+    const ends = ['is','issons','issez'];
+    return radical + ends[imperatifIdx];
+  }
+  if(verbEntry.group==='re'){
+    const radical = verbEntry.inf.slice(0,-2);
+    const ends = ['s','ons','ez'];
+    return radical + ends[imperatifIdx];
+  }
+  return null;
+}
+
+function fullPasseCompose(verbEntry, personIndex, gender, subjOverride){
+  const subjLabels = ['je','tu','il','nous','vous','ils'];
+  const form = passeCompose(verbEntry, personIndex, gender);
+  if(!form) return null;
+  const subj = subjOverride !== undefined ? subjOverride : subjLabels[personIndex];
+  const startsVowel = /^[aeiouhâàéèêëîïôöùûü]/i.test(form);
+  if(personIndex===0 && !verbEntry.reflexive && startsVowel){
+    return "j'"+form;
+  }
+  if(!subj) return form; // no subject prefix (reflexive display handled separately)
+  return subj+' '+form;
+}
+
+
+
+// ============================================================
+// VERB DATABASE — curated, verified entries with meanings
+// group: 'er'|'ir'|'re'|'irregular'  pattern: subpattern for -er
+// archetype: irregular family key    aux: avoir|etre (for passé composé)
+// pp: explicit past participle for regular verbs needing it for compound tenses
+// ============================================================
+
+const VERBS_RAW = [
+// ===== -ER STANDARD (most common, no spelling changes) =====
+{inf:'parler',group:'er',pattern:'standard',meaning:'to speak',aux:'avoir'},
+{inf:'aimer',group:'er',pattern:'standard',meaning:'to love, to like',aux:'avoir'},
+{inf:'donner',group:'er',pattern:'standard',meaning:'to give',aux:'avoir'},
+{inf:'chanter',group:'er',pattern:'standard',meaning:'to sing',aux:'avoir'},
+{inf:'regarder',group:'er',pattern:'standard',meaning:'to watch, to look at',aux:'avoir'},
+{inf:'écouter',group:'er',pattern:'standard',meaning:'to listen',aux:'avoir'},
+{inf:'travailler',group:'er',pattern:'standard',meaning:'to work',aux:'avoir'},
+{inf:'demander',group:'er',pattern:'standard',meaning:'to ask',aux:'avoir'},
+{inf:'trouver',group:'er',pattern:'standard',meaning:'to find',aux:'avoir'},
+{inf:'penser',group:'er',pattern:'standard',meaning:'to think',aux:'avoir'},
+{inf:'montrer',group:'er',pattern:'standard',meaning:'to show',aux:'avoir'},
+{inf:'porter',group:'er',pattern:'standard',meaning:'to carry, to wear',aux:'avoir'},
+{inf:'rester',group:'er',pattern:'standard',meaning:'to stay',aux:'etre'},
+{inf:'passer',group:'er',pattern:'standard',meaning:'to pass, to spend (time)',aux:'avoir'},
+{inf:'arriver',group:'er',pattern:'standard',meaning:'to arrive',aux:'etre'},
+{inf:'entrer',group:'er',pattern:'standard',meaning:'to enter',aux:'etre'},
+{inf:'tomber',group:'er',pattern:'standard',meaning:'to fall',aux:'etre'},
+{inf:'rentrer',group:'er',pattern:'standard',meaning:'to go back home',aux:'etre'},
+{inf:'retourner',group:'er',pattern:'standard',meaning:'to return, to go back',aux:'etre'},
+{inf:'monter',group:'er',pattern:'standard',meaning:'to go up, to climb',aux:'etre'},
+{inf:'chercher',group:'er',pattern:'standard',meaning:'to look for',aux:'avoir'},
+{inf:'présenter',group:'er',pattern:'standard',meaning:'to present, to introduce',aux:'avoir'},
+{inf:'aider',group:'er',pattern:'standard',meaning:'to help',aux:'avoir'},
+{inf:'continuer',group:'er',pattern:'standard',meaning:'to continue',aux:'avoir'},
+{inf:'décider',group:'er',pattern:'standard',meaning:'to decide',aux:'avoir'},
+{inf:'expliquer',group:'er',pattern:'standard',meaning:'to explain',aux:'avoir'},
+{inf:'oublier',group:'er',pattern:'standard',meaning:'to forget',aux:'avoir'},
+{inf:'gagner',group:'er',pattern:'standard',meaning:'to win, to earn',aux:'avoir'},
+{inf:'tourner',group:'er',pattern:'standard',meaning:'to turn',aux:'avoir'},
+{inf:'marcher',group:'er',pattern:'standard',meaning:'to walk',aux:'avoir'},
+{inf:'fermer',group:'er',pattern:'standard',meaning:'to close',aux:'avoir'},
+{inf:'laisser',group:'er',pattern:'standard',meaning:'to leave, to let',aux:'avoir'},
+{inf:'accepter',group:'er',pattern:'standard',meaning:'to accept',aux:'avoir'},
+{inf:'ajouter',group:'er',pattern:'standard',meaning:'to add',aux:'avoir'},
+{inf:'jouer',group:'er',pattern:'standard',meaning:'to play',aux:'avoir'},
+{inf:'sembler',group:'er',pattern:'standard',meaning:'to seem',aux:'avoir'},
+{inf:'créer',group:'er',pattern:'standard',meaning:'to create',aux:'avoir'},
+{inf:'utiliser',group:'er',pattern:'standard',meaning:'to use',aux:'avoir'},
+{inf:'habiter',group:'er',pattern:'standard',meaning:'to live (somewhere)',aux:'avoir'},
+{inf:'commander',group:'er',pattern:'standard',meaning:'to order',aux:'avoir'},
+{inf:'apporter',group:'er',pattern:'standard',meaning:'to bring',aux:'avoir'},
+{inf:'casser',group:'er',pattern:'standard',meaning:'to break',aux:'avoir'},
+{inf:'compter',group:'er',pattern:'standard',meaning:'to count',aux:'avoir'},
+{inf:'dessiner',group:'er',pattern:'standard',meaning:'to draw',aux:'avoir'},
+{inf:'dîner',group:'er',pattern:'standard',meaning:'to have dinner',aux:'avoir'},
+{inf:'doubler',group:'er',pattern:'standard',meaning:'to double, to overtake',aux:'avoir'},
+{inf:'durer',group:'er',pattern:'standard',meaning:'to last',aux:'avoir'},
+{inf:'embrasser',group:'er',pattern:'standard',meaning:'to kiss',aux:'avoir'},
+{inf:'emprunter',group:'er',pattern:'standard',meaning:'to borrow',aux:'avoir'},
+{inf:'enseigner',group:'er',pattern:'standard',meaning:'to teach',aux:'avoir'},
+{inf:'fonder',group:'er',pattern:'standard',meaning:'to found',aux:'avoir'},
+{inf:'fumer',group:'er',pattern:'standard',meaning:'to smoke',aux:'avoir'},
+{inf:'goûter',group:'er',pattern:'standard',meaning:'to taste',aux:'avoir'},
+{inf:'imaginer',group:'er',pattern:'standard',meaning:'to imagine',aux:'avoir'},
+{inf:'inviter',group:'er',pattern:'standard',meaning:'to invite',aux:'avoir'},
+{inf:'laver',group:'er',pattern:'standard',meaning:'to wash',aux:'avoir'},
+{inf:'livrer',group:'er',pattern:'standard',meaning:'to deliver',aux:'avoir'},
+{inf:'louer',group:'er',pattern:'standard',meaning:'to rent, to praise',aux:'avoir'},
+{inf:'manquer',group:'er',pattern:'standard',meaning:'to miss',aux:'avoir'},
+{inf:'noter',group:'er',pattern:'standard',meaning:'to note',aux:'avoir'},
+{inf:'occuper',group:'er',pattern:'standard',meaning:'to occupy',aux:'avoir'},
+{inf:'organiser',group:'er',pattern:'standard',meaning:'to organize',aux:'avoir'},
+{inf:'oser',group:'er',pattern:'standard',meaning:'to dare',aux:'avoir'},
+{inf:'pleurer',group:'er',pattern:'standard',meaning:'to cry',aux:'avoir'},
+{inf:'pousser',group:'er',pattern:'standard',meaning:'to push, to grow',aux:'avoir'},
+{inf:'pratiquer',group:'er',pattern:'standard',meaning:'to practice',aux:'avoir'},
+{inf:'préparer',group:'er',pattern:'standard',meaning:'to prepare',aux:'avoir'},
+{inf:'prêter',group:'er',pattern:'standard',meaning:'to lend',aux:'avoir'},
+{inf:'prouver',group:'er',pattern:'standard',meaning:'to prove',aux:'avoir'},
+{inf:'raconter',group:'er',pattern:'standard',meaning:'to tell, to narrate',aux:'avoir'},
+{inf:'refuser',group:'er',pattern:'standard',meaning:'to refuse',aux:'avoir'},
+{inf:'remarquer',group:'er',pattern:'standard',meaning:'to notice',aux:'avoir'},
+{inf:'remercier',group:'er',pattern:'standard',meaning:'to thank',aux:'avoir'},
+{inf:'rencontrer',group:'er',pattern:'standard',meaning:'to meet',aux:'avoir'},
+{inf:'réparer',group:'er',pattern:'standard',meaning:'to repair',aux:'avoir'},
+{inf:'rêver',group:'er',pattern:'standard',meaning:'to dream',aux:'avoir'},
+{inf:'saluer',group:'er',pattern:'standard',meaning:'to greet',aux:'avoir'},
+{inf:'signer',group:'er',pattern:'standard',meaning:'to sign',aux:'avoir'},
+{inf:'skier',group:'er',pattern:'standard',meaning:'to ski',aux:'avoir'},
+{inf:'souhaiter',group:'er',pattern:'standard',meaning:'to wish',aux:'avoir'},
+{inf:'tester',group:'er',pattern:'standard',meaning:'to test',aux:'avoir'},
+{inf:'toucher',group:'er',pattern:'standard',meaning:'to touch',aux:'avoir'},
+{inf:'tuer',group:'er',pattern:'standard',meaning:'to kill',aux:'avoir'},
+{inf:'visiter',group:'er',pattern:'standard',meaning:'to visit (a place)',aux:'avoir'},
+{inf:'voler',group:'er',pattern:'standard',meaning:'to fly, to steal',aux:'avoir'},
+{inf:'voyager',group:'er',pattern:'ger',meaning:'to travel',aux:'avoir'},
+
+// ===== -ER with -ger pattern (soft g, add e before a/o) =====
+{inf:'manger',group:'er',pattern:'ger',meaning:'to eat',aux:'avoir'},
+{inf:'changer',group:'er',pattern:'ger',meaning:'to change',aux:'avoir'},
+{inf:'nager',group:'er',pattern:'ger',meaning:'to swim',aux:'avoir'},
+{inf:'partager',group:'er',pattern:'ger',meaning:'to share',aux:'avoir'},
+{inf:'corriger',group:'er',pattern:'ger',meaning:'to correct',aux:'avoir'},
+{inf:'déménager',group:'er',pattern:'ger',meaning:'to move (house)',aux:'avoir'},
+{inf:'mélanger',group:'er',pattern:'ger',meaning:'to mix',aux:'avoir'},
+{inf:'protéger',group:'er',pattern:'ger',meaning:'to protect',aux:'avoir'},
+{inf:'ranger',group:'er',pattern:'ger',meaning:'to tidy up',aux:'avoir'},
+{inf:'songer',group:'er',pattern:'ger',meaning:'to think, to ponder',aux:'avoir'},
+{inf:'bouger',group:'er',pattern:'ger',meaning:'to move',aux:'avoir'},
+{inf:'juger',group:'er',pattern:'ger',meaning:'to judge',aux:'avoir'},
+{inf:'obliger',group:'er',pattern:'ger',meaning:'to oblige',aux:'avoir'},
+{inf:'plonger',group:'er',pattern:'ger',meaning:'to dive',aux:'avoir'},
+{inf:'rédiger',group:'er',pattern:'ger',meaning:'to write, to draft',aux:'avoir'},
+
+// ===== -ER with -cer pattern (ç before a/o) =====
+{inf:'commencer',group:'er',pattern:'cer',meaning:'to start, to begin',aux:'avoir'},
+{inf:'prononcer',group:'er',pattern:'cer',meaning:'to pronounce',aux:'avoir'},
+{inf:'avancer',group:'er',pattern:'cer',meaning:'to move forward',aux:'avoir'},
+{inf:'remplacer',group:'er',pattern:'cer',meaning:'to replace',aux:'avoir'},
+{inf:'lancer',group:'er',pattern:'cer',meaning:'to throw, to launch',aux:'avoir'},
+{inf:'placer',group:'er',pattern:'cer',meaning:'to place',aux:'avoir'},
+{inf:'forcer',group:'er',pattern:'cer',meaning:'to force',aux:'avoir'},
+{inf:'menacer',group:'er',pattern:'cer',meaning:'to threaten',aux:'avoir'},
+{inf:'tracer',group:'er',pattern:'cer',meaning:'to trace, to draw a line',aux:'avoir'},
+{inf:'effacer',group:'er',pattern:'cer',meaning:'to erase',aux:'avoir'},
+
+// ===== -ER e_er pattern (e -> è: lever, acheter type) =====
+{inf:'lever',group:'er',pattern:'e_er',meaning:'to lift, to raise',aux:'avoir'},
+{inf:'acheter',group:'er',pattern:'e_er',meaning:'to buy',aux:'avoir'},
+{inf:'amener',group:'er',pattern:'e_er',meaning:'to bring (someone)',aux:'avoir'},
+{inf:'emmener',group:'er',pattern:'e_er',meaning:'to take (someone) along',aux:'avoir'},
+{inf:'peser',group:'er',pattern:'e_er',meaning:'to weigh',aux:'avoir'},
+{inf:'mener',group:'er',pattern:'e_er',meaning:'to lead',aux:'avoir'},
+{inf:'enlever',group:'er',pattern:'e_er',meaning:'to remove',aux:'avoir'},
+{inf:'geler',group:'er',pattern:'e_er',meaning:'to freeze',aux:'avoir'},
+
+// ===== -ER ee_er pattern (é -> è: préférer, espérer type) =====
+{inf:'préférer',group:'er',pattern:'ee_er',meaning:'to prefer',aux:'avoir'},
+{inf:'espérer',group:'er',pattern:'ee_er',meaning:'to hope',aux:'avoir'},
+{inf:'répéter',group:'er',pattern:'ee_er',meaning:'to repeat',aux:'avoir'},
+{inf:'célébrer',group:'er',pattern:'ee_er',meaning:'to celebrate',aux:'avoir'},
+{inf:'considérer',group:'er',pattern:'ee_er',meaning:'to consider',aux:'avoir'},
+{inf:'posséder',group:'er',pattern:'ee_er',meaning:'to possess, to own',aux:'avoir'},
+{inf:'suggérer',group:'er',pattern:'ee_er',meaning:'to suggest',aux:'avoir'},
+{inf:'exagérer',group:'er',pattern:'ee_er',meaning:'to exaggerate',aux:'avoir'},
+{inf:'libérer',group:'er',pattern:'ee_er',meaning:'to free, to liberate',aux:'avoir'},
+{inf:'opérer',group:'er',pattern:'ee_er',meaning:'to operate',aux:'avoir'},
+
+// ===== -ER eler_dbl pattern (appeler type: ll) =====
+{inf:'appeler',group:'er',pattern:'eler_dbl',meaning:'to call',aux:'avoir'},
+{inf:'rappeler',group:'er',pattern:'eler_dbl',meaning:'to call back, to remind',aux:'avoir'},
+{inf:'épeler',group:'er',pattern:'eler_dbl',meaning:'to spell',aux:'avoir'},
+
+// ===== -ER eter_dbl pattern (jeter type: tt) =====
+{inf:'jeter',group:'er',pattern:'eter_dbl',meaning:'to throw',aux:'avoir'},
+{inf:'rejeter',group:'er',pattern:'eter_dbl',meaning:'to reject',aux:'avoir'},
+{inf:'projeter',group:'er',pattern:'eter_dbl',meaning:'to plan, to project',aux:'avoir'},
+
+// ===== -ER yer pattern (y -> i: payer, employer, essuyer) =====
+{inf:'payer',group:'er',pattern:'yer',meaning:'to pay',aux:'avoir'},
+{inf:'employer',group:'er',pattern:'yer',meaning:'to employ, to use',aux:'avoir'},
+{inf:'essuyer',group:'er',pattern:'yer',meaning:'to wipe',aux:'avoir'},
+{inf:'envoyer_SKIP',group:'er',pattern:'yer',meaning:'SKIP-irregular futur, see irregular list',aux:'avoir'}, // envoyer handled as irregular due to futur
+
+// ===== REGULAR -IR (with -issons pattern) =====
+{inf:'finir',group:'ir',meaning:'to finish',aux:'avoir'},
+{inf:'choisir',group:'ir',meaning:'to choose',aux:'avoir'},
+{inf:'réussir',group:'ir',meaning:'to succeed',aux:'avoir'},
+{inf:'grandir',group:'ir',meaning:'to grow up',aux:'avoir'},
+{inf:'remplir',group:'ir',meaning:'to fill',aux:'avoir'},
+{inf:'salir',group:'ir',meaning:'to dirty, to soil',aux:'avoir'},
+{inf:'punir',group:'ir',meaning:'to punish',aux:'avoir'},
+{inf:'rougir',group:'ir',meaning:'to blush, to turn red',aux:'avoir'},
+{inf:'vieillir',group:'ir',meaning:'to grow old, to age',aux:'avoir'},
+{inf:'maigrir',group:'ir',meaning:'to lose weight',aux:'avoir'},
+{inf:'grossir',group:'ir',meaning:'to gain weight',aux:'avoir'},
+{inf:'guérir',group:'ir',meaning:'to heal, to cure',aux:'avoir'},
+{inf:'agir',group:'ir',meaning:'to act',aux:'avoir'},
+{inf:'avertir',group:'ir',meaning:'to warn',aux:'avoir'},
+{inf:'bâtir',group:'ir',meaning:'to build',aux:'avoir'},
+{inf:'définir',group:'ir',meaning:'to define',aux:'avoir'},
+{inf:'établir',group:'ir',meaning:'to establish',aux:'avoir'},
+{inf:'fleurir',group:'ir',meaning:'to flower, to bloom',aux:'avoir'},
+{inf:'franchir',group:'ir',meaning:'to cross, to get over',aux:'avoir'},
+{inf:'investir',group:'ir',meaning:'to invest',aux:'avoir'},
+{inf:'nourrir',group:'ir',meaning:'to feed, to nourish',aux:'avoir'},
+{inf:'obéir',group:'ir',meaning:'to obey',aux:'avoir'},
+{inf:'pâlir',group:'ir',meaning:'to turn pale',aux:'avoir'},
+{inf:'ralentir',group:'ir',meaning:'to slow down',aux:'avoir'},
+{inf:'réfléchir',group:'ir',meaning:'to reflect, to think',aux:'avoir'},
+{inf:'saisir',group:'ir',meaning:'to seize, to grasp',aux:'avoir'},
+{inf:'unir',group:'ir',meaning:'to unite',aux:'avoir'},
+{inf:'envahir',group:'ir',meaning:'to invade',aux:'avoir'},
+
+// ===== REGULAR -RE =====
+{inf:'vendre',group:'re',meaning:'to sell',aux:'avoir'},
+{inf:'attendre',group:'re',meaning:'to wait',aux:'avoir'},
+{inf:'descendre',group:'re',meaning:'to go down, to descend',aux:'etre'},
+{inf:'répondre',group:'re',meaning:'to answer',aux:'avoir'},
+{inf:'perdre',group:'re',meaning:'to lose',aux:'avoir'},
+{inf:'entendre',group:'re',meaning:'to hear',aux:'avoir'},
+{inf:'rendre',group:'re',meaning:'to give back, to return',aux:'avoir'},
+{inf:'défendre',group:'re',meaning:'to defend',aux:'avoir'},
+{inf:'dépendre',group:'re',meaning:'to depend',aux:'avoir'},
+{inf:'étendre',group:'re',meaning:'to extend, to spread',aux:'avoir'},
+{inf:'fondre',group:'re',meaning:'to melt',aux:'avoir'},
+{inf:'mordre',group:'re',meaning:'to bite',aux:'avoir'},
+{inf:'pendre',group:'re',meaning:'to hang',aux:'avoir'},
+{inf:'tendre',group:'re',meaning:'to stretch, to hold out',aux:'avoir'},
+{inf:'tondre',group:'re',meaning:'to mow',aux:'avoir'},
+
+// ===== IRREGULAR VERBS (mapped to archetype) =====
+{inf:'être',group:'irregular',archetype:'etre',meaning:'to be',aux:'avoir'},
+{inf:'avoir',group:'irregular',archetype:'avoir',meaning:'to have',aux:'avoir'},
+{inf:'aller',group:'irregular',archetype:'aller',meaning:'to go',aux:'etre'},
+{inf:'faire',group:'irregular',archetype:'faire',meaning:'to do, to make',aux:'avoir'},
+{inf:'pouvoir',group:'irregular',archetype:'pouvoir',meaning:'to be able to, can',aux:'avoir'},
+{inf:'vouloir',group:'irregular',archetype:'vouloir',meaning:'to want',aux:'avoir'},
+{inf:'devoir',group:'irregular',archetype:'devoir',meaning:'to have to, to owe',aux:'avoir'},
+{inf:'savoir',group:'irregular',archetype:'savoir',meaning:'to know (a fact/how to)',aux:'avoir'},
+{inf:'venir',group:'irregular',archetype:'venir',meaning:'to come',aux:'etre'},
+{inf:'devenir',group:'irregular',archetype:'venir',prefix:'de',meaning:'to become',aux:'etre'},
+{inf:'revenir',group:'irregular',archetype:'venir',prefix:'re',meaning:'to come back',aux:'etre'},
+{inf:'tenir',group:'irregular',archetype:'tenir',meaning:'to hold',aux:'avoir'},
+{inf:'obtenir',group:'irregular',archetype:'tenir',prefix:'ob',meaning:'to obtain, to get',aux:'avoir'},
+{inf:'maintenir',group:'irregular',archetype:'tenir',prefix:'main',meaning:'to maintain',aux:'avoir'},
+{inf:'prendre',group:'irregular',archetype:'prendre',meaning:'to take',aux:'avoir'},
+{inf:'apprendre',group:'irregular',archetype:'prendre',prefix:'ap',meaning:'to learn',aux:'avoir'},
+{inf:'comprendre',group:'irregular',archetype:'prendre',prefix:'com',meaning:'to understand',aux:'avoir'},
+{inf:'surprendre',group:'irregular',archetype:'prendre',prefix:'sur',meaning:'to surprise',aux:'avoir'},
+{inf:'mettre',group:'irregular',archetype:'mettre',meaning:'to put',aux:'avoir'},
+{inf:'permettre',group:'irregular',archetype:'mettre',prefix:'per',meaning:'to allow, to permit',aux:'avoir'},
+{inf:'promettre',group:'irregular',archetype:'mettre',prefix:'pro',meaning:'to promise',aux:'avoir'},
+{inf:'remettre',group:'irregular',archetype:'mettre',prefix:'re',meaning:'to hand in, to postpone',aux:'avoir'},
+{inf:'voir',group:'irregular',archetype:'voir',meaning:'to see',aux:'avoir'},
+{inf:'revoir',group:'irregular',archetype:'voir',prefix:'re',meaning:'to see again',aux:'avoir'},
+{inf:'croire',group:'irregular',archetype:'croire',meaning:'to believe',aux:'avoir'},
+{inf:'dire',group:'irregular',archetype:'dire',meaning:'to say, to tell',aux:'avoir'},
+{inf:'écrire',group:'irregular',archetype:'écrire',meaning:'to write',aux:'avoir'},
+{inf:'décrire',group:'irregular',archetype:'écrire',prefix:'d',meaning:'to describe',aux:'avoir'},
+{inf:'lire',group:'irregular',archetype:'lire',meaning:'to read',aux:'avoir'},
+{inf:'boire',group:'irregular',archetype:'boire',meaning:'to drink',aux:'avoir'},
+{inf:'connaître',group:'irregular',archetype:'connaître',meaning:'to know (a person/place)',aux:'avoir'},
+{inf:'reconnaître',group:'irregular',archetype:'connaître',prefix:'re',meaning:'to recognize',aux:'avoir'},
+{inf:'naître',group:'irregular',archetype:'naître',meaning:'to be born',aux:'etre'},
+{inf:'partir',group:'irregular',archetype:'partir',meaning:'to leave, to depart',aux:'etre'},
+{inf:'sortir',group:'irregular',archetype:'sortir',meaning:'to go out, to exit',aux:'etre'},
+{inf:'dormir',group:'irregular',archetype:'dormir',meaning:'to sleep',aux:'avoir'},
+{inf:'sentir',group:'irregular',archetype:'sentir',meaning:'to feel, to smell',aux:'avoir'},
+{inf:'servir',group:'irregular',archetype:'servir',meaning:'to serve',aux:'avoir'},
+{inf:'ouvrir',group:'irregular',archetype:'ouvrir',meaning:'to open',aux:'avoir'},
+{inf:'couvrir',group:'irregular',archetype:'ouvrir',prefix:'c',meaning:'to cover',aux:'avoir'},
+{inf:'découvrir',group:'irregular',archetype:'ouvrir',prefix:'déc',meaning:'to discover',aux:'avoir'},
+{inf:'offrir',group:'irregular',archetype:'offrir',meaning:'to offer, to give (a gift)',aux:'avoir'},
+{inf:'souffrir',group:'irregular',archetype:'souffrir',meaning:'to suffer',aux:'avoir'},
+{inf:'courir',group:'irregular',archetype:'courir',meaning:'to run',aux:'avoir'},
+{inf:'mourir',group:'irregular',archetype:'mourir',meaning:'to die',aux:'etre'},
+{inf:'recevoir',group:'irregular',archetype:'recevoir',meaning:'to receive',aux:'avoir'},
+{inf:'apercevoir',group:'irregular',archetype:'apercevoir',meaning:'to notice, to glimpse',aux:'avoir'},
+{inf:'envoyer',group:'irregular',archetype:'envoyer',meaning:'to send',aux:'avoir'},
+{inf:'rire',group:'irregular',archetype:'rire',meaning:'to laugh',aux:'avoir'},
+{inf:'sourire',group:'irregular',archetype:'rire',prefix:'sou',meaning:'to smile',aux:'avoir'},
+{inf:'suivre',group:'irregular',archetype:'suivre',meaning:'to follow',aux:'avoir'},
+{inf:'vivre',group:'irregular',archetype:'vivre',meaning:'to live',aux:'avoir'},
+{inf:'conduire',group:'irregular',archetype:'conduire',meaning:'to drive',aux:'avoir'},
+{inf:'construire',group:'irregular',archetype:'construire',meaning:'to build, to construct',aux:'avoir'},
+{inf:'détruire',group:'irregular',archetype:'détruire',meaning:'to destroy',aux:'avoir'},
+{inf:'traduire',group:'irregular',archetype:'traduire',meaning:'to translate',aux:'avoir'},
+{inf:'craindre',group:'irregular',archetype:'craindre',meaning:'to fear',aux:'avoir'},
+{inf:'peindre',group:'irregular',archetype:'peindre',meaning:'to paint',aux:'avoir'},
+{inf:'joindre',group:'irregular',archetype:'joindre',meaning:'to join',aux:'avoir'},
+{inf:'battre',group:'irregular',archetype:'battre',meaning:'to beat, to fight',aux:'avoir'},
+{inf:'plaire',group:'irregular',archetype:'plaire',meaning:'to please',aux:'avoir'},
+{inf:'falloir',group:'irregular',archetype:'falloir',meaning:'to be necessary (it is necessary)',aux:'avoir'},
+{inf:'pleuvoir',group:'irregular',archetype:'pleuvoir',meaning:'to rain (it rains)',aux:'avoir'},
+{inf:'valoir',group:'irregular',archetype:'valoir',meaning:'to be worth',aux:'avoir'},
+
+// ===== REFLEXIVE VERBS (reuse base archetypes/patterns + reflexive:true) =====
+{inf:'lever',group:'er',pattern:'e_er',meaning:'to get up, to stand up',aux:'etre',reflexive:true,displayInf:'se lever'},
+{inf:'appeler',group:'er',pattern:'eler_dbl',meaning:'to be called, named',aux:'etre',reflexive:true,displayInf:"s'appeler"},
+{inf:'laver',group:'er',pattern:'standard',meaning:'to wash oneself',aux:'etre',reflexive:true,displayInf:'se laver'},
+{inf:'habiller',group:'er',pattern:'standard',meaning:'to get dressed',aux:'etre',reflexive:true,displayInf:"s'habiller"},
+{inf:'coucher',group:'er',pattern:'standard',meaning:'to go to bed',aux:'etre',reflexive:true,displayInf:'se coucher'},
+{inf:'réveiller',group:'er',pattern:'standard',meaning:'to wake up',aux:'etre',reflexive:true,displayInf:'se réveiller'},
+{inf:'promener',group:'er',pattern:'e_er',meaning:'to go for a walk',aux:'etre',reflexive:true,displayInf:'se promener'},
+{inf:'reposer',group:'er',pattern:'standard',meaning:'to rest',aux:'etre',reflexive:true,displayInf:'se reposer'},
+{inf:'dépêcher',group:'er',pattern:'standard',meaning:'to hurry',aux:'etre',reflexive:true,displayInf:'se dépêcher'},
+{inf:'amuser',group:'er',pattern:'standard',meaning:'to have fun',aux:'etre',reflexive:true,displayInf:"s'amuser"},
+{inf:'arrêter',group:'er',pattern:'standard',meaning:'to stop (oneself)',aux:'etre',reflexive:true,displayInf:"s'arrêter"},
+{inf:'occuper',group:'er',pattern:'standard',meaning:'to take care of, to keep busy',aux:'etre',reflexive:true,displayInf:"s'occuper"},
+{inf:'intéresser',group:'er',pattern:'standard',meaning:'to be interested',aux:'etre',reflexive:true,displayInf:"s'intéresser"},
+{inf:'souvenir',group:'irregular',archetype:'venir',prefix:'sou',meaning:'to remember',aux:'etre',reflexive:true,displayInf:'se souvenir'},
+{inf:'demander',group:'er',pattern:'standard',meaning:'to wonder',aux:'etre',reflexive:true,displayInf:'se demander'},
+{inf:'marier',group:'er',pattern:'standard',meaning:'to get married',aux:'etre',reflexive:true,displayInf:'se marier'},
+{inf:'fâcher',group:'er',pattern:'standard',meaning:'to get angry',aux:'etre',reflexive:true,displayInf:'se fâcher'},
+{inf:'ennuyer',group:'er',pattern:'yer',meaning:'to get bored',aux:'etre',reflexive:true,displayInf:"s'ennuyer"},
+{inf:'inquiéter',group:'er',pattern:'ee_er',meaning:'to worry (oneself)',aux:'etre',reflexive:true,displayInf:"s'inquiéter"},
+{inf:'préparer',group:'er',pattern:'standard',meaning:'to get ready',aux:'etre',reflexive:true,displayInf:'se préparer'},
+{inf:'sentir',group:'irregular',archetype:'sentir',meaning:'to feel (a certain way)',aux:'etre',reflexive:true,displayInf:'se sentir'},
+{inf:'trouver',group:'er',pattern:'standard',meaning:'to be located, to find oneself',aux:'etre',reflexive:true,displayInf:'se trouver'},
+{inf:'perdre',group:'re',meaning:'to get lost',aux:'etre',reflexive:true,displayInf:'se perdre'},
+{inf:'rendre',group:'re',meaning:'to realize (rendre compte) / to go (somewhere)',aux:'etre',reflexive:true,displayInf:'se rendre'},
+{inf:'battre',group:'irregular',archetype:'battre',meaning:'to fight (each other)',aux:'etre',reflexive:true,displayInf:'se battre'},
+{inf:'plaindre',group:'irregular',archetype:'plaindre',meaning:'to complain',aux:'etre',reflexive:true,displayInf:'se plaindre'},
+];
+
+// Clean up skip placeholders
+const VERBS = VERBS_RAW.filter(v => !v.inf.includes('_skip') && !v.inf.includes('_SKIP'));
+
+
+
+// GAME LOGIC
+// ============================================================
+
+const MOODS = {
+  indicatif: {
+    label: 'Indicatif',
+    tenses: {
+      present:       'Présent',
+      imparfait:     'Imparfait',
+      passeCompose:  'Passé composé',
+      plusQueParfait:'Plus-que-parfait',
+      futur:         'Futur simple',
+      futurAnterieur:'Futur antérieur',
+      passeSimple:   'Passé simple',
+    }
+  },
+  conditionnel: {
+    label: 'Conditionnel',
+    tenses: {
+      conditionnel:      'Conditionnel présent',
+      conditionnelPasse: 'Conditionnel passé',
+    }
+  },
+  subjonctif: {
+    label: 'Subjonctif',
+    tenses: {
+      subjPresent: 'Subjonctif présent',
+      subjonctifPasse: 'Subjonctif passé',
+    }
+  },
+  imperatif: {
+    label: 'Impératif',
+    tenses: {
+      imperatif: 'Impératif présent',
+    }
+  },
+};
+
+// 9 distinct quiz targets
+// Index: 0=je, 1=tu, 2=il, 3=elle, 4=on, 5=nous, 6=vous, 7=ils, 8=elles
+// Maps to conjugation person index (0-5):
+const TARGET_TO_PERSON = [0,1,2,2,2,3,4,5,5];
+// Gender: il/ils=m, elle/elles=f, on=m (on takes masculine agreement by default)
+// je/tu/nous/vous = ambiguous (null) for être verbs
+const TARGET_GENDER    = [null,null,'m','f','m',null,null,'m','f'];
+const TARGET_LABELS    = ['je','tu','il','elle','on','nous','vous','ils','elles'];
+const PRONOUN_DISPLAY  = ['je','tu','il','elle','on','nous','vous','ils','elles'];
+const SUBJ_DISPLAY     = ['je','tu','il','elle','on','nous','vous','ils','elles'];
+
+// Whether a tense + aux combo requires agreement checking
+function needsAgreement(verb, tense) {
+  if (tense === 'passeCompose') return verb.aux === 'etre' || verb.reflexive;
+  return false;
+}
+
+// Build the correct answer for a given target (0-7)
+function getAnswer(verb, tense, targetIdx) {
+  const personIdx = TARGET_TO_PERSON[targetIdx];
+  const gender = TARGET_GENDER[targetIdx]; // null = ambiguous
+
+  const subjLabel = SUBJ_DISPLAY[targetIdx];
+
+  // ---- Impératif: tu/nous/vous only ----
+  if (tense === 'imperatif') {
+    const imperatifMap = {1:0, 5:1, 6:2};
+    const impIdx = imperatifMap[targetIdx];
+    if (impIdx === undefined) return null;
+    const form = imperatif(verb, impIdx);
+    if (!form) return null;
+    return { main: form, alt: null, ambiguous: false, subjLabel: '' };
+  }
+
+  // ---- Compound tenses ----
+  const compoundFns = { passeCompose, plusQueParfait, futurAnterieur, conditionnelPasse, subjonctifPasse };
+  if (compoundFns[tense]) {
+    const fn = compoundFns[tense];
+    const needsAgr = verb.aux === 'etre' || verb.reflexive;
+    if (gender === null && needsAgr) {
+      const mForm = fn(verb, personIdx, 'm');
+      const fForm = fn(verb, personIdx, 'f');
+      if (!mForm) return null;
+      return { main: mForm, alt: fForm, ambiguous: true, subjLabel };
+    }
+    const g = gender || 'm';
+    const form = fn(verb, personIdx, g);
+    if (!form) return null;
+    return { main: form, alt: null, ambiguous: false, subjLabel };
+  }
+
+  // ---- Simple tenses ----
+  const forms = conjugate(verb, tense);
+  if (!forms) return null;
+  const form = forms[personIdx];
+  if (form === null || form === undefined) return null;
+  return { main: form, alt: null, ambiguous: false, subjLabel };
+}
+
+// Build the subject pronoun prefix for display
+function buildSubjectPrefix(verb, tense, targetIdx) {
+  const label = SUBJ_DISPLAY[targetIdx];
+  const personIdx = TARGET_TO_PERSON[targetIdx];
+  // For reflexive verbs in passé composé, the reflexive pronoun is already
+  // baked into the form returned by passeCompose(), so no extra subject prefix
+  if (verb.reflexive && tense === 'passeCompose') {
+    return label; // show "je", "tu", etc. as the prompt pronoun
+  }
+  return label;
+}
+
+// ===== SOUND EFFECTS (synthesized, no audio files needed) =====
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function tone(ctx, freq, start, dur, type, peak){
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || 'sine';
+  osc.frequency.setValueAtTime(freq, start);
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(peak == null ? 0.18 : peak, start + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + dur + 0.03);
+}
+function sweep(ctx, f1, f2, start, dur, type, peak){
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || 'sine';
+  osc.frequency.setValueAtTime(f1, start);
+  osc.frequency.exponentialRampToValueAtTime(f2, start + dur);
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(peak == null ? 0.18 : peak, start + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + dur + 0.03);
+}
+// A pool of different "funny" correct-answer sounds — a new random one plays each time.
+const CORRECT_SOUNDS = [
+  (ctx) => { const t = ctx.currentTime; tone(ctx, 988, t, 0.09, 'square', 0.15); tone(ctx, 1319, t + 0.08, 0.16, 'square', 0.15); }, // coin blip
+  (ctx) => { const t = ctx.currentTime; sweep(ctx, 220, 880, t, 0.15, 'sine', 0.2); sweep(ctx, 880, 440, t + 0.15, 0.15, 'sine', 0.15); }, // boing
+  (ctx) => { const t = ctx.currentTime; [523, 659, 784].forEach((f, i) => tone(ctx, f, t + i * 0.09, 0.16, 'triangle', 0.18)); }, // ascending fanfare
+  (ctx) => { const t = ctx.currentTime; [1046, 880, 698].forEach((f, i) => tone(ctx, f, t + i * 0.07, 0.26, 'sine', 0.14)); }, // bell cascade
+  (ctx) => { const t = ctx.currentTime; tone(ctx, 659, t, 0.12, 'square', 0.15); tone(ctx, 988, t + 0.1, 0.3, 'square', 0.18); }, // cartoon ta-da
+  (ctx) => { const t = ctx.currentTime; [1200, 1600, 2000].forEach((f, i) => tone(ctx, f, t + i * 0.04, 0.07, 'sine', 0.12)); }, // sparkle
+  (ctx) => { const t = ctx.currentTime; sweep(ctx, 300, 1200, t, 0.1, 'sawtooth', 0.12); tone(ctx, 1500, t + 0.1, 0.12, 'sine', 0.15); }, // slide-whistle pop
+  (ctx) => { const t = ctx.currentTime; [440, 550, 660, 880].forEach((f, i) => tone(ctx, f, t + i * 0.05, 0.1, 'triangle', 0.14)); }, // xylophone run
+];
+function playCorrectSound(){
+  try {
+    const ctx = getAudioCtx();
+    const fn = CORRECT_SOUNDS[Math.floor(Math.random() * CORRECT_SOUNDS.length)];
+    fn(ctx);
+  } catch (e) { /* audio unavailable, ignore */ }
+}
+function playWrongSound(){
+  try {
+    const ctx = getAudioCtx();
+    const t = ctx.currentTime;
+    sweep(ctx, 220, 110, t, 0.28, 'sawtooth', 0.16);
+  } catch (e) { /* audio unavailable, ignore */ }
+}
+
+// ===== ENGLISH TRANSLATION ENGINE (shows what the answered tense means) =====
+const PRONOUN_EN = ['I', 'you', 'he', 'she', 'one', 'we', 'you', 'they', 'they'];
+const IRREGULAR_EN = {
+  be:{past:'was/were',pp:'been',s:'is'}, have:{past:'had',pp:'had',s:'has'}, go:{past:'went',pp:'gone'},
+  do:{past:'did',pp:'done'}, say:{past:'said',pp:'said'}, get:{past:'got',pp:'gotten'}, make:{past:'made',pp:'made'},
+  know:{past:'knew',pp:'known'}, think:{past:'thought',pp:'thought'}, see:{past:'saw',pp:'seen'}, come:{past:'came',pp:'come'},
+  take:{past:'took',pp:'taken'}, give:{past:'gave',pp:'given'}, find:{past:'found',pp:'found'}, tell:{past:'told',pp:'told'},
+  become:{past:'became',pp:'become'}, leave:{past:'left',pp:'left'}, feel:{past:'felt',pp:'felt'}, put:{past:'put',pp:'put'},
+  bring:{past:'brought',pp:'brought'}, begin:{past:'began',pp:'begun'}, keep:{past:'kept',pp:'kept'}, hold:{past:'held',pp:'held'},
+  write:{past:'wrote',pp:'written'}, stand:{past:'stood',pp:'stood'}, hear:{past:'heard',pp:'heard'}, let:{past:'let',pp:'let'},
+  mean:{past:'meant',pp:'meant'}, set:{past:'set',pp:'set'}, meet:{past:'met',pp:'met'}, run:{past:'ran',pp:'run'},
+  pay:{past:'paid',pp:'paid'}, sit:{past:'sat',pp:'sat'}, speak:{past:'spoke',pp:'spoken'}, lead:{past:'led',pp:'led'},
+  read:{past:'read',pp:'read'}, grow:{past:'grew',pp:'grown'}, lose:{past:'lost',pp:'lost'}, fall:{past:'fell',pp:'fallen'},
+  send:{past:'sent',pp:'sent'}, build:{past:'built',pp:'built'}, understand:{past:'understood',pp:'understood'},
+  draw:{past:'drew',pp:'drawn'}, break:{past:'broke',pp:'broken'}, spend:{past:'spent',pp:'spent'}, cut:{past:'cut',pp:'cut'},
+  drive:{past:'drove',pp:'driven'}, buy:{past:'bought',pp:'bought'}, wear:{past:'wore',pp:'worn'}, choose:{past:'chose',pp:'chosen'},
+  catch:{past:'caught',pp:'caught'}, teach:{past:'taught',pp:'taught'}, sell:{past:'sold',pp:'sold'}, sing:{past:'sang',pp:'sung'},
+  eat:{past:'ate',pp:'eaten'}, drink:{past:'drank',pp:'drunk'}, fly:{past:'flew',pp:'flown'}, sleep:{past:'slept',pp:'slept'},
+  win:{past:'won',pp:'won'}, wake:{past:'woke',pp:'woken'}, rise:{past:'rose',pp:'risen'}, ride:{past:'rode',pp:'ridden'},
+  swim:{past:'swam',pp:'swum'}, throw:{past:'threw',pp:'thrown'}, forget:{past:'forgot',pp:'forgotten'}, die:{past:'died',pp:'died'},
+  live:{past:'lived',pp:'lived'}, want:{past:'wanted',pp:'wanted'}, like:{past:'liked',pp:'liked'}, love:{past:'loved',pp:'loved'},
+  need:{past:'needed',pp:'needed'}, use:{past:'used',pp:'used'}, work:{past:'worked',pp:'worked'}, call:{past:'called',pp:'called'},
+  ask:{past:'asked',pp:'asked'}, watch:{past:'watched',pp:'watched'}, look:{past:'looked',pp:'looked'}, listen:{past:'listened',pp:'listened'},
+  help:{past:'helped',pp:'helped'}, play:{past:'played',pp:'played'}, move:{past:'moved',pp:'moved'}, believe:{past:'believed',pp:'believed'},
+  happen:{past:'happened',pp:'happened'}, show:{past:'showed',pp:'shown'}, try:{past:'tried',pp:'tried'}, change:{past:'changed',pp:'changed'},
+  follow:{past:'followed',pp:'followed'}, stop:{past:'stopped',pp:'stopped'}, create:{past:'created',pp:'created'},
+  open:{past:'opened',pp:'opened'}, walk:{past:'walked',pp:'walked'}, offer:{past:'offered',pp:'offered'},
+  remember:{past:'remembered',pp:'remembered'}, consider:{past:'considered',pp:'considered'}, appear:{past:'appeared',pp:'appeared'},
+  wait:{past:'waited',pp:'waited'}, serve:{past:'served',pp:'served'}, expect:{past:'expected',pp:'expected'},
+  stay:{past:'stayed',pp:'stayed'}, remain:{past:'remained',pp:'remained'}, arrive:{past:'arrived',pp:'arrived'},
+  enter:{past:'entered',pp:'entered'}, return:{past:'returned',pp:'returned'}, close:{past:'closed',pp:'closed'},
+  finish:{past:'finished',pp:'finished'}, start:{past:'started',pp:'started'}, continue:{past:'continued',pp:'continued'},
+  study:{past:'studied',pp:'studied'}, learn:{past:'learned',pp:'learned'}, sing:{past:'sang',pp:'sung'},
+};
+function baseVerbEnglish(meaning){
+  let m = (meaning || '').split(',')[0].trim();
+  if (m.toLowerCase().startsWith('to ')) m = m.slice(3);
+  return m.trim().toLowerCase();
+}
+function thirdPersonSEN(v){
+  const irr = IRREGULAR_EN[v];
+  if (irr && irr.s) return irr.s;
+  if (v === 'have') return 'has';
+  if (/(?:s|sh|ch|x|z|o)$/.test(v)) return v + 'es';
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + 'ies';
+  return v + 's';
+}
+function pastTenseEN(v){
+  const irr = IRREGULAR_EN[v];
+  if (irr) return irr.past;
+  if (/e$/.test(v)) return v + 'd';
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + 'ied';
+  return v + 'ed';
+}
+function pastParticipleEN(v){
+  const irr = IRREGULAR_EN[v];
+  if (irr) return irr.pp;
+  return pastTenseEN(v);
+}
+function gerundEN(v){
+  if (v === 'be') return 'being';
+  if (/ie$/.test(v)) return v.slice(0, -2) + 'ying';
+  if (/[^e]e$/.test(v)) return v.slice(0, -1) + 'ing';
+  return v + 'ing';
+}
+function presentEN(v, targetIdx){
+  const heShe = (targetIdx === 2 || targetIdx === 3 || targetIdx === 4); // il / elle / on
+  if (v === 'be') return heShe ? 'is' : (targetIdx === 0 ? 'am' : 'are');
+  return heShe ? thirdPersonSEN(v) : v;
+}
+// Builds a short English translation for the pronoun + mood/tense that was just answered.
+function translateAnswer(verb, mood, tense, targetIdx){
+  try {
+    const base = baseVerbEnglish(verb.meaning);
+    if (!base) return null;
+    const p = PRONOUN_EN[targetIdx];
+    const pLower = p.toLowerCase();
+    switch (mood + '.' + tense) {
+      case 'indicatif.present': return p + ' ' + presentEN(base, targetIdx);
+      case 'indicatif.imparfait': {
+        const aux = (targetIdx === 1 || targetIdx === 5 || targetIdx === 6 || targetIdx === 7 || targetIdx === 8) ? 'were' : 'was';
+        return p + ' ' + aux + ' ' + gerundEN(base);
+      }
+      case 'indicatif.passeCompose': return p + ' ' + pastTenseEN(base);
+      case 'indicatif.plusQueParfait': return p + ' had ' + pastParticipleEN(base);
+      case 'indicatif.futur': return p + ' will ' + base;
+      case 'indicatif.futurAnterieur': return p + ' will have ' + pastParticipleEN(base);
+      case 'indicatif.passeSimple': return p + ' ' + pastTenseEN(base) + ' (littéraire)';
+      case 'conditionnel.conditionnel': return p + ' would ' + base;
+      case 'conditionnel.conditionnelPasse': return p + ' would have ' + pastParticipleEN(base);
+      case 'subjonctif.subjPresent': return 'that ' + pLower + ' ' + base;
+      case 'subjonctif.subjonctifPasse': return 'that ' + pLower + ' have ' + pastParticipleEN(base);
+      case 'imperatif.imperatif': return base.charAt(0).toUpperCase() + base.slice(1) + '!';
+      default: return p + ' ' + base;
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+let currentMood = 'indicatif';
+let currentTense = 'present';
+let currentVerb = null;
+let currentTargetIdx = 0;
+let streak = 0;
+let bestStreakSession = 0;
+let totalAttempts = 0;
+let totalCorrect = 0;
+let questionStartTime = null;
+let answered = false;
+let currentAnswer = null; // { main, alt, ambiguous }
+
+function pickRandomVerb() {
+  return VERBS[Math.floor(Math.random() * VERBS.length)];
+}
+function pickRandomTarget() {
+  return Math.floor(Math.random() * 9);
+}
+
+function newQuestion() {
+  answered = false;
+  let verb, targetIdx, answer;
+  let tries = 0;
+  do {
+    verb = pickRandomVerb();
+    targetIdx = pickRandomTarget();
+    answer = getAnswer(verb, currentTense, targetIdx);
+    tries++;
+  } while ((!answer || answer.main === null || answer.main === undefined) && tries < 40);
+
+  if (!answer || answer.main === null) return;
+
+  currentVerb = verb;
+  currentTargetIdx = targetIdx;
+  currentAnswer = answer;
+
+  const displayInf = verb.displayInf || verb.inf;
+  document.getElementById('verbDisplay').textContent = displayInf;
+  document.getElementById('verbMeaning').textContent = verb.meaning;
+
+  // Show the pronoun prompt
+  const pronounLabel = PRONOUN_DISPLAY[targetIdx];
+  document.getElementById('pronounDisplay').textContent = pronounLabel;
+
+  // Tense/mood label
+  const moodLabel = MOODS[currentMood] ? MOODS[currentMood].label : '';
+  const tenseLabel = MOODS[currentMood] ? (MOODS[currentMood].tenses[currentTense] || currentTense) : currentTense;
+  document.getElementById('moodTenseLabel').textContent = moodLabel + ' · ' + tenseLabel;
+
+  // Hint display
+  let hint = '';
+  if (answer.ambiguous) hint = '(masculin ou féminin accepté)';
+  else if (currentTense === 'imperatif') hint = '(impératif — pas de sujet)';
+  document.getElementById('pcHint').textContent = hint;
+
+  // For imperatif, grey out the pronoun display (no subject used)
+  const pronounEl = document.getElementById('pronounDisplay');
+  if (currentTense === 'imperatif') {
+    pronounEl.style.opacity = '0.35';
+    pronounEl.style.textDecoration = 'line-through';
+  } else {
+    pronounEl.style.opacity = '1';
+    pronounEl.style.textDecoration = 'none';
+  }
+
+  const input = document.getElementById('answerInput');
+  input.value = '';
+  input.classList.remove('correct', 'wrong');
+  input.disabled = false;
+  document.getElementById('feedback').textContent = '';
+  document.getElementById('feedback').className = 'feedback';
+  input.focus();
+  questionStartTime = Date.now();
+}
+
+function normalize(s) {
+  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function checkAnswer() {
+  if (answered) return;
+  const input = document.getElementById('answerInput');
+  const userAns = normalize(input.value);
+  const mainAns = normalize(currentAnswer.main);
+  const altAns  = currentAnswer.alt ? normalize(currentAnswer.alt) : null;
+  const elapsed = (Date.now() - questionStartTime) / 1000;
+  const isCorrect = (userAns === mainAns) || (altAns && userAns === altAns);
+
+  answered = true;
+  totalAttempts++;
+  const feedback = document.getElementById('feedback');
+
+  function buildDisplay(s, form) {
+    if (!s) return form;
+    if (s === 'je' && /^[aeiouhâàéèêëîïôöùûü]/i.test(form)) return "j'" + form;
+    return s + ' ' + form;
+  }
+  const translation = translateAnswer(currentVerb, currentMood, currentTense, currentTargetIdx);
+
+  if (isCorrect) {
+    streak++;
+    totalCorrect++;
+    input.classList.add('correct');
+    playCorrectSound();
+    feedback.textContent = '✓ Correct !  (' + elapsed.toFixed(1) + 's)' + (translation ? '  →  "' + translation + '"' : '');
+    feedback.className = 'feedback correct';
+    if (streak > bestStreakSession) bestStreakSession = streak;
+    updateStats();
+    saveProgressIfNamed(elapsed);
+    setTimeout(newQuestion, 1100);
+  } else {
+    streak = 0;
+    input.classList.add('wrong');
+    playWrongSound();
+    const subj = currentAnswer.subjLabel || '';
+    let correction = buildDisplay(subj, currentAnswer.main);
+    if (currentAnswer.ambiguous) correction += ' / ' + buildDisplay(subj, currentAnswer.alt);
+    feedback.textContent = '✗ La bonne réponse : ' + correction + (translation ? '  →  "' + translation + '"' : '');
+    feedback.className = 'feedback wrong';
+    updateStats();
+    saveProgressIfNamed(elapsed);
+    input.disabled = true;
+  }
+}
+
+function updateStats() {
+  document.getElementById('statStreak').textContent = streak;
+  document.getElementById('statBest').textContent = bestStreakSession;
+  const acc = totalAttempts > 0 ? Math.round(100 * totalCorrect / totalAttempts) : null;
+  document.getElementById('statAccuracy').textContent = acc === null ? '—' : acc + '%';
+}
+
+// ===== Storage-backed live leaderboard =====
+function getPlayerName() {
+  return (document.getElementById('playerName').value || '').trim();
+}
+
+function computeScore(bestStreak, accuracyPct, avgTime) {
+  const speedBonus = Math.max(0, 10 - Math.min(avgTime, 10));
+  return Math.round(bestStreak * 10 * (accuracyPct / 100) + speedBonus * 5);
+}
+
+let questionTimes = [];
+
+async function saveProgressIfNamed(lastElapsed) {
+  const name = getPlayerName();
+  if (!name) return;
+  questionTimes.push(lastElapsed);
+  if (questionTimes.length > 30) questionTimes.shift();
+  const avgTime = questionTimes.reduce((a, b) => a + b, 0) / questionTimes.length;
+  const accuracyPct = totalAttempts > 0 ? (100 * totalCorrect / totalAttempts) : 0;
+  const score = computeScore(bestStreakSession, accuracyPct, avgTime);
+
+  try {
+    let best = null;
+    try { const ex = await window.storage.get('lb:' + name, true); if (ex) best = JSON.parse(ex.value); } catch(e) {}
+    if (!best || score > best.score) {
+      const record = { name, score, bestStreak: bestStreakSession, accuracy: Math.round(accuracyPct), avgTime: Math.round(avgTime * 10) / 10, updatedAt: Date.now() };
+      await window.storage.set('lb:' + name, JSON.stringify(record), true);
+    }
+  } catch (e) { console.error('Storage write error', e); }
+  refreshLeaderboard();
+}
+
+async function refreshLeaderboard() {
+  const listEl = document.getElementById('leaderboardList');
+  try {
+    const keys = await window.storage.list('lb:', true);
+    if (!keys || !keys.keys || keys.keys.length === 0) {
+      listEl.innerHTML = '<div class="empty-lb">Aucun score pour l\'instant — soyez le premier !</div>';
+      return;
+    }
+    const records = [];
+    for (const k of keys.keys) {
+      try { const r = await window.storage.get(k.key || k, true); if (r) records.push(JSON.parse(r.value)); } catch(e) {}
+    }
+    records.sort((a, b) => b.score - a.score);
+    const top = records.slice(0, 10);
+    listEl.innerHTML = top.map((r, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+      return '<div class="lb-row"><div class="lb-rank">' + medal + '</div><div class="lb-name">' + escapeHtml(r.name) + '<div class="lb-meta">série ' + r.bestStreak + ' · ' + r.accuracy + '% · ' + r.avgTime + 's/q</div></div><div class="lb-score">' + r.score + '</div></div>';
+    }).join('');
+  } catch (e) {
+    console.error('Leaderboard refresh error', e);
+    listEl.innerHTML = '<div class="empty-lb">Connexion au classement...</div>';
+    setTimeout(refreshLeaderboard, 2000);
+  }
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+// ===== Mood / tense selector UI =====
+function renderMoodSelector() {
+  const el = document.getElementById('moodSelector');
+  el.innerHTML = Object.keys(MOODS).map(m =>
+    '<button class="sel-btn' + (m === currentMood ? ' active' : '') + '" data-mood="' + m + '">' + MOODS[m].label + '</button>'
+  ).join('');
+  el.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      currentMood = btn.dataset.mood;
+      currentTense = Object.keys(MOODS[currentMood].tenses)[0];
+      renderMoodSelector();
+      renderTenseSelector();
+      newQuestion();
+    };
+  });
+}
+
+function renderTenseSelector() {
+  const el = document.getElementById('tenseSelector');
+  const tenses = MOODS[currentMood].tenses;
+  el.innerHTML = Object.keys(tenses).map(t =>
+    '<button class="sel-btn' + (t === currentTense ? ' active' : '') + '" data-tense="' + t + '">' + tenses[t] + '</button>'
+  ).join('');
+  el.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      currentTense = btn.dataset.tense;
+      renderTenseSelector();
+      newQuestion();
+    };
+  });
+}
+
+document.getElementById('checkBtn').onclick = checkAnswer;
+document.getElementById('skipBtn').onclick = () => { streak = 0; updateStats(); newQuestion(); };
+document.getElementById('answerInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { if (answered) { newQuestion(); } else { checkAnswer(); } }
+});
+document.getElementById('playerName').addEventListener('change', refreshLeaderboard);
+
+// ===== Name-first gating: the student must enter a name before the verb tabs / game appear =====
+let gameStarted = false;
+function startGame(){
+  const name = getPlayerName();
+  const gateMsg = document.getElementById('gateMsg');
+  if (!name) {
+    gateMsg.textContent = '⚠️ Merci d\'entrer votre nom avant de commencer.';
+    gateMsg.style.color = 'var(--coral-light)';
+    document.getElementById('playerName').focus();
+    return;
+  }
+  gateMsg.style.display = 'none';
+  document.getElementById('startBtn').style.display = 'none';
+  document.getElementById('gameArea').style.display = 'block';
+  if (!gameStarted) {
+    gameStarted = true;
+    newQuestion();
+  }
+}
+document.getElementById('startBtn').onclick = startGame;
+document.getElementById('playerName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); startGame(); }
+});
+
+renderMoodSelector();
+renderTenseSelector();
+updateStats();
+// The live leaderboard is always shown and refreshed, even before the student starts playing.
+const lbStatusEl = document.getElementById('lbStatus');
+if (storageBackend === 'firebase') {
+  lbStatusEl.textContent = '🟢 en ligne — partagé entre tous les appareils';
+} else if (storageBackend === 'native') {
+  lbStatusEl.textContent = '🟢 en ligne — partagé';
+} else {
+  lbStatusEl.textContent = '🟡 local à cet appareil (configuration Firebase requise)';
+  lbStatusEl.style.color = 'var(--gold)';
+}
+refreshLeaderboard();
+setInterval(refreshLeaderboard, 15000);
+
+</script>
+</body>
+</html>
