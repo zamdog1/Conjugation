@@ -1152,12 +1152,14 @@ function imperatif(verbEntry, imperatifIdx){
   }
   if(verbEntry.group==='er'){
     // regular -er: tu=parle(no s), nous=parlons, vous=parlez
-    const radical = verbEntry.inf.slice(0,-2);
+    // Must reuse erStem() so spelling-change patterns (e_er, ee_er, eler_dbl,
+    // eter_dbl, yer, ger, cer, ...) apply here too — e.g. "considérer" -> tu
+    // imperative is "considère", not the plain-stem "considére".
+    const personMap = [1, 3, 4]; // tu, nous, vous -> erStem's person index (je,tu,il,nous,vous,ils)
+    const i = personMap[imperatifIdx];
+    const stem = erStem(verbEntry.inf, verbEntry.pattern, i);
     const ends = ['e','ons','ez'];
-    // spelling changes for nous/vous only for ger/cer
-    if(verbEntry.pattern==='ger' && imperatifIdx===1) return radical+'e'+'ons';
-    if(verbEntry.pattern==='cer' && imperatifIdx===1) return radical.slice(0,-1)+'ç'+'ons';
-    return radical + ends[imperatifIdx];
+    return stem + ends[imperatifIdx];
   }
   if(verbEntry.group==='ir'){
     const radical = verbEntry.inf.slice(0,-2);
