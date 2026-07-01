@@ -107,6 +107,9 @@ body{
 }
 .sel-btn:hover{background:rgba(247,243,233,0.14);}
 .sel-btn.active{background:var(--coral);border-color:var(--coral);color:#fff;}
+.sel-btn.disabled{opacity:0.3;cursor:not-allowed;}
+.sel-btn.disabled:hover{background:rgba(247,243,233,0.07);}
+.category-label{font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(247,243,233,0.5);margin:0 0 6px 2px;}
 
 .card{
   background:var(--parchment);
@@ -264,6 +267,8 @@ body{
       <div class="stat-pill"><div class="num" id="statAccuracy">—</div><div class="lbl">Précision</div></div>
     </div>
 
+    <div class="category-label">Groupe de verbes</div>
+    <div class="selector-row" id="categorySelector"></div>
     <div class="selector-row" id="moodSelector"></div>
     <div class="selector-row" id="tenseSelector"></div>
 
@@ -294,10 +299,12 @@ body{
 // =====================================================================================
 // LIVE LEADERBOARD — backed by Firebase (Cloud Firestore)
 // =====================================================================================
-// This makes the leaderboard genuinely internet-connected, with NO login required for
-// students: every student, on every device, reads/writes the SAME database live.
-// Uses the same Firebase project as your other apps — just a different collection
-// ("conjugaison_leaderboard") so nothing collides with existing data.
+// Cross-device, no login required for students.
+// Architecture:
+//   - Each student's score is ONE Firestore document: conjugaison_leaderboard/{name}
+//   - Reading the leaderboard = ONE collection query (not N+1 individual reads)
+//   - A real-time onSnapshot listener updates the board the instant any score changes
+//   - Falls back to localStorage if opened without internet (no crash, just local)
 // =====================================================================================
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyByaWorFmYHKlSG0TEFBxSfZAkKh3AFc8k",
@@ -309,82 +316,125 @@ const FIREBASE_CONFIG = {
 };
 const FIRESTORE_COLLECTION = 'conjugaison_leaderboard';
 
-function fbEncodeKey(k){ return encodeURIComponent(k).replace(/\./g, '%2E'); }
-function fbDecodeKey(k){ return decodeURIComponent(k.replace(/%2E/g, '.')); }
+let db = null;
+let storageBackend = 'local';
+let lbUnsubscribe = null; // holds the real-time listener cleanup function
 
-let storageBackend = 'local'; // 'firebase' (shared, no login) | 'native' (Claude session) | 'local' (this device only)
+// Safe Firestore document key: replace characters Firestore doesn't allow
+function safeDocId(name) {
+  return name.trim()
+    .replace(/\//g, '_')
+    .replace(/\./g, '_')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, '_')
+    .slice(0, 100) || 'anonymous';
+}
 
-(function ensureStorage(){
-  // 1) Preferred: Firebase Firestore. Fully shared, no student login required.
-  if (FIREBASE_CONFIG.projectId && window.firebase) {
-    try {
-      firebase.initializeApp(FIREBASE_CONFIG);
-      const db = firebase.firestore();
-      storageBackend = 'firebase';
-      window.storage = {
-        async get(key, shared){
-          const snap = await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).get();
-          if (!snap.exists) throw new Error('key not found: ' + key);
-          return { key, value: snap.data().value, shared: !!shared };
-        },
-        async set(key, value, shared){
-          await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).set({ value });
-          return { key, value, shared: !!shared };
-        },
-        async delete(key, shared){
-          await db.collection(FIRESTORE_COLLECTION).doc(fbEncodeKey(key)).delete();
-          return { key, deleted: true, shared: !!shared };
-        },
-        async list(prefix, shared){
-          const snap = await db.collection(FIRESTORE_COLLECTION).get();
-          const keys = [];
-          snap.forEach(doc => {
-            const k = fbDecodeKey(doc.id);
-            if (!prefix || k.startsWith(prefix)) keys.push({ key: k });
-          });
-          return { keys, prefix: prefix || '', shared: !!shared };
-        }
-      };
-      return;
-    } catch (e) {
-      console.error('Firebase init failed, falling back', e);
-    }
-  }
-
-  // 2) If running inside a Claude session that already provides window.storage, use it.
-  if (window.storage && typeof window.storage.get === 'function') {
-    storageBackend = 'native';
+(function initFirebase() {
+  if (!window.firebase || !FIREBASE_CONFIG.projectId) {
+    storageBackend = 'local';
+    console.warn('Firebase unavailable — using localStorage fallback');
     return;
   }
-
-  // 3) Fallback: localStorage. Works without errors, but is NOT shared across
-  // devices/students — only visible on this one browser.
-  storageBackend = 'local';
-  const PREFIX = 'conjugaison_storage__';
-  function fullKey(key){ return PREFIX + key; }
-  window.storage = {
-    async get(key, shared){
-      const raw = localStorage.getItem(fullKey(key));
-      if (raw === null) throw new Error('key not found: ' + key);
-      return { key, value: raw, shared: !!shared };
-    },
-    async set(key, value, shared){
-      localStorage.setItem(fullKey(key), value);
-      return { key, value, shared: !!shared };
-    },
-    async delete(key, shared){
-      localStorage.removeItem(fullKey(key));
-      return { key, deleted: true, shared: !!shared };
-    },
-    async list(prefix, shared){
-      const p = fullKey(prefix || '');
-      const keys = Object.keys(localStorage)
-        .filter(k => k.startsWith(p))
-        .map(k => ({ key: k.slice(PREFIX.length) }));
-      return { keys, prefix: prefix || '', shared: !!shared };
-    }
-  };
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    // Enable offline persistence so the leaderboard survives brief connection drops
+    db.enablePersistence({ synchronizeTabs: true }).catch(() => {
+      // Persistence may fail in some browsers (private mode, etc.) — not fatal
+    });
+    storageBackend = 'firebase';
+  } catch (e) {
+    console.error('Firebase init error:', e);
+    storageBackend = 'local';
+  }
 })();
+
+// ===== Save / update this student's score (single document write) =====
+async function saveScore(name, score, bestStreak, accuracyPct, avgTime) {
+  if (storageBackend === 'firebase' && db) {
+    const docId = safeDocId(name);
+    try {
+      // Only update if the new score is higher than what's stored
+      const ref = db.collection(FIRESTORE_COLLECTION).doc(docId);
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || score > (snap.data().score || 0)) {
+          tx.set(ref, {
+            name,
+            score,
+            bestStreak,
+            accuracy: Math.round(accuracyPct),
+            avgTime: Math.round(avgTime * 10) / 10,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      });
+    } catch (e) {
+      console.error('Score save error:', e);
+    }
+  } else {
+    // localStorage fallback
+    try {
+      const key = 'lb_' + name;
+      const existing = localStorage.getItem(key);
+      const best = existing ? JSON.parse(existing) : null;
+      if (!best || score > best.score) {
+        localStorage.setItem(key, JSON.stringify({ name, score, bestStreak, accuracy: Math.round(accuracyPct), avgTime: Math.round(avgTime * 10) / 10 }));
+      }
+    } catch(e) {}
+  }
+}
+
+// ===== Real-time leaderboard listener (fires immediately + on every change) =====
+function startLeaderboardListener() {
+  if (storageBackend === 'firebase' && db) {
+    if (lbUnsubscribe) { lbUnsubscribe(); lbUnsubscribe = null; }
+    // No orderBy here — that would require a Firestore index to be manually created.
+    // Instead we fetch all records and sort in JS. Works instantly with zero setup.
+    lbUnsubscribe = db.collection(FIRESTORE_COLLECTION)
+      .limit(200)
+      .onSnapshot(snap => {
+        const records = snap.docs.map(d => d.data())
+          .sort((a, b) => (b.score || 0) - (a.score || 0))
+          .slice(0, 10);
+        renderLeaderboard(records);
+      }, err => {
+        console.error('Leaderboard listener error:', err);
+        renderLeaderboard(null);
+      });
+  } else {
+    try {
+      const records = Object.keys(localStorage)
+        .filter(k => k.startsWith('lb_'))
+        .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e) { return null; } })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10);
+      renderLeaderboard(records);
+    } catch(e) { renderLeaderboard(null); }
+  }
+}
+
+function renderLeaderboard(records) {
+  const listEl = document.getElementById('leaderboardList');
+  if (!listEl) return;
+  if (!records || records.length === 0) {
+    listEl.innerHTML = '<div class="empty-lb">Aucun score pour l\'instant — soyez le premier !</div>';
+    return;
+  }
+  listEl.innerHTML = records.map((r, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+    return '<div class="lb-row"><div class="lb-rank">' + medal + '</div>' +
+      '<div class="lb-name">' + escapeHtml(r.name || '?') +
+      '<div class="lb-meta">série ' + (r.bestStreak||0) + ' · ' + (r.accuracy||0) + '% · ' + (r.avgTime||0) + 's/q</div></div>' +
+      '<div class="lb-score">' + (r.score||0) + '</div></div>';
+  }).join('');
+}
+
+// Legacy wrapper kept so the rest of the code still works
+async function refreshLeaderboard() {
+  startLeaderboardListener();
+}
 
 // ===== BUNDLED FRENCH CONJUGATION ENGINE =====
 
@@ -396,6 +446,14 @@ const P = ['je','tu','il','nous','vous','ils']; // il=il/elle/on, ils=ils/elles
 
 function lastChar(s){ return s.slice(-1); }
 function isNousVous(i){ return i===3||i===4; }
+// Replaces the LAST occurrence of `vowel` in a radical with 'è' — used for the
+// e->è (acheter) and é->è (préférer/sécher) mutations. Robust to any length of
+// consonant cluster following the mutating vowel (fixes cases like "sécher"
+// where a naive "assume 1 trailing consonant" slice would be wrong).
+function mutateToEGrave(radical, vowel){
+  const idx = radical.lastIndexOf(vowel);
+  return radical.slice(0,idx)+'è'+radical.slice(idx+1);
+}
 
 // ---- Regular -ER (with spelling-change subpatterns) ----
 function erStem(inf, pattern, i){
@@ -405,10 +463,15 @@ function erStem(inf, pattern, i){
       return (i===3) ? r+'e' : r;
     case 'cer': // commencer -> nous commençons
       return (i===3) ? r.slice(0,-1)+'ç' : r;
-    case 'e_er': // acheter -> j'achète: last vowel 'e' (2nd-to-last char of radical) becomes 'è'
-      return isNousVous(i) ? r : r.slice(0,-2)+'è'+r.slice(-1);
-    case 'ee_er': // préférer -> je préfère: same mutation, the é before final consonant becomes è
-      return isNousVous(i) ? r : r.slice(0,-2)+'è'+r.slice(-1);
+    case 'eger': // protéger -> je protège (è) but nous protégeons / vous protégez (soft g, no è)
+      if (i===3) return r+'e';
+      if (i===4) return r;
+      return mutateToEGrave(r,'é');
+    case 'e_er': // acheter -> j'achète: the last 'e' before the final consonant(s) becomes 'è'
+      return isNousVous(i) ? r : mutateToEGrave(r,'e');
+    case 'ee_er': // préférer/sécher -> je préfère/je sèche: the LAST 'é' becomes 'è' (robust to
+      // any consonant cluster length after it, e.g. "ch" in sécher)
+      return isNousVous(i) ? r : mutateToEGrave(r,'é');
     case 'eler_dbl': // appeler -> j'appelle
       return isNousVous(i) ? r : r+lastChar(r);
     case 'eter_dbl': // jeter -> je jette
@@ -449,18 +512,34 @@ function conjugateRegularER(inf, pattern, tense){
     let stem = erStem(inf, pattern, i);
     if(tense==='present') out.push(stem+END.presER[i]);
     else if(tense==='imparfait'){
-      let impStem = (pattern==='ger' && i!==3 && i!==4) ? radical+'e' : (pattern==='cer' && i!==3 && i!==4) ? radical.slice(0,-1)+'ç' : radical;
+      let impStem = ((pattern==='ger'||pattern==='eger') && i!==3 && i!==4) ? radical+'e' : (pattern==='cer' && i!==3 && i!==4) ? radical.slice(0,-1)+'ç' : radical;
       out.push(impStem+END.imp[i]);
     }
+    else if(tense==='passeSimple'){
+      // Passé simple always uses the plain radical (no è mutation, no consonant
+      // doubling, no y->i) — those only apply in present-tense-like contexts.
+      // The one exception: ger/eger verbs need the soft-g 'e' (and cer verbs the
+      // ç) for every person EXCEPT ils/elles, since '-èrent' already starts with
+      // a soft vowel (manger -> mangeai/mangeas/...mangeâtes but ils mangèrent).
+      let psStem;
+      if(pattern==='ger' || pattern==='eger'){
+        psStem = (i!==5) ? radical+'e' : radical;
+      } else if(pattern==='cer'){
+        psStem = (i!==5) ? radical.slice(0,-1)+'ç' : radical;
+      } else {
+        psStem = radical;
+      }
+      out.push(psStem+END.psER[i]);
+    }
     else if(tense==='futur'){
-      const futStem = (pattern==='e_er') ? radical.slice(0,-2)+'è'+lastChar(radical)+'er'
+      const futStem = (pattern==='e_er') ? mutateToEGrave(radical,'e')+'er'
                      : (pattern==='eler_dbl') ? radical+lastChar(radical)+'er'
                      : (pattern==='eter_dbl') ? radical+lastChar(radical)+'er'
                      : inf;
       out.push(futStem+END.fut[i]);
     }
     else if(tense==='conditionnel'){
-      const condStem = (pattern==='e_er') ? radical.slice(0,-2)+'è'+lastChar(radical)+'er'
+      const condStem = (pattern==='e_er') ? mutateToEGrave(radical,'e')+'er'
                      : (pattern==='eler_dbl') ? radical+lastChar(radical)+'er'
                      : (pattern==='eter_dbl') ? radical+lastChar(radical)+'er'
                      : inf;
@@ -975,6 +1054,52 @@ const IRREGULAR = {
     subjPres: ['souffre','souffres','souffre','souffrions','souffriez','souffrent'],
     impv: ['souffre','souffrons','souffrez'],
   },
+  // ===== Added for the expanded verb list =====
+  prévoir: { // like voir, EXCEPT futur/conditionnel: prévoirai (not préverrai)
+    present: ['prévois','prévois','prévoit','prévoyons','prévoyez','prévoient'],
+    imparfaitStem: 'prévoy',
+    futurStem: 'prévoir',
+    ps: ['prévis','prévis','prévit','prévîmes','prévîtes','prévirent'],
+    pp: 'prévu',
+    subjPres: ['prévoie','prévoies','prévoie','prévoyions','prévoyiez','prévoient'],
+    impv: ['prévois','prévoyons','prévoyez'],
+  },
+  'paraître': {
+    present: ['parais','parais','paraît','paraissons','paraissez','paraissent'],
+    imparfaitStem: 'paraiss',
+    futurStem: 'paraîtr',
+    ps: ['parus','parus','parut','parûmes','parûtes','parurent'],
+    pp: 'paru',
+    subjPres: ['paraisse','paraisses','paraisse','paraissions','paraissiez','paraissent'],
+    impv: ['parais','paraissons','paraissez'],
+  },
+  'éteindre': {
+    present: ['éteins','éteins','éteint','éteignons','éteignez','éteignent'],
+    imparfaitStem: 'éteign',
+    futurStem: 'éteindr',
+    ps: ['éteignis','éteignis','éteignit','éteignîmes','éteignîtes','éteignirent'],
+    pp: 'éteint',
+    subjPres: ['éteigne','éteignes','éteigne','éteignions','éteigniez','éteignent'],
+    impv: ['éteins','éteignons','éteignez'],
+  },
+  atteindre: {
+    present: ['atteins','atteins','atteint','atteignons','atteignez','atteignent'],
+    imparfaitStem: 'atteign',
+    futurStem: 'atteindr',
+    ps: ['atteignis','atteignis','atteignit','atteignîmes','atteignîtes','atteignirent'],
+    pp: 'atteint',
+    subjPres: ['atteigne','atteignes','atteigne','atteignions','atteigniez','atteignent'],
+    impv: ['atteins','atteignons','atteignez'],
+  },
+  'décevoir': {
+    present: ['déçois','déçois','déçoit','décevons','décevez','déçoivent'],
+    imparfaitStem: 'decev',
+    futurStem: 'decevr',
+    ps: ['déçus','déçus','déçut','déçûmes','déçûtes','déçurent'],
+    pp: 'déçu',
+    subjPres: ['déçoive','déçoives','déçoive','decevions','deceviez','déçoivent'],
+    impv: ['déçois','décevons','décevez'],
+  },
 };
 
 delete IRREGULAR.voir2_apercevoir;
@@ -1293,7 +1418,7 @@ const VERBS_RAW = [
 {inf:'corriger',group:'er',pattern:'ger',meaning:'to correct',aux:'avoir'},
 {inf:'déménager',group:'er',pattern:'ger',meaning:'to move (house)',aux:'avoir'},
 {inf:'mélanger',group:'er',pattern:'ger',meaning:'to mix',aux:'avoir'},
-{inf:'protéger',group:'er',pattern:'ger',meaning:'to protect',aux:'avoir'},
+{inf:'protéger',group:'er',pattern:'eger',meaning:'to protect',aux:'avoir'},
 {inf:'ranger',group:'er',pattern:'ger',meaning:'to tidy up',aux:'avoir'},
 {inf:'songer',group:'er',pattern:'ger',meaning:'to think, to ponder',aux:'avoir'},
 {inf:'bouger',group:'er',pattern:'ger',meaning:'to move',aux:'avoir'},
@@ -1492,10 +1617,277 @@ const VERBS_RAW = [
 {inf:'rendre',group:'re',meaning:'to realize (rendre compte) / to go (somewhere)',aux:'etre',reflexive:true,displayInf:'se rendre'},
 {inf:'battre',group:'irregular',archetype:'battre',meaning:'to fight (each other)',aux:'etre',reflexive:true,displayInf:'se battre'},
 {inf:'plaindre',group:'irregular',archetype:'plaindre',meaning:'to complain',aux:'etre',reflexive:true,displayInf:'se plaindre'},
+
+// ===== NEW VERBS: 1er groupe régulier (standard -er) =====
+{inf:"admirer",group:"er",pattern:"standard",meaning:"to admire",aux:"avoir"},
+{inf:"adorer",group:"er",pattern:"standard",meaning:"to adore",aux:"avoir"},
+{inf:"avouer",group:"er",pattern:"standard",meaning:"to admit, to confess",aux:"avoir"},
+{inf:"baisser",group:"er",pattern:"standard",meaning:"to lower",aux:"avoir"},
+{inf:"briller",group:"er",pattern:"standard",meaning:"to shine",aux:"avoir"},
+{inf:"brûler",group:"er",pattern:"standard",meaning:"to burn",aux:"avoir"},
+{inf:"cacher",group:"er",pattern:"standard",meaning:"to hide",aux:"avoir"},
+{inf:"calculer",group:"er",pattern:"standard",meaning:"to calculate",aux:"avoir"},
+{inf:"causer",group:"er",pattern:"standard",meaning:"to cause, to chat",aux:"avoir"},
+{inf:"cesser",group:"er",pattern:"standard",meaning:"to stop, to cease",aux:"avoir"},
+{inf:"coller",group:"er",pattern:"standard",meaning:"to stick, to glue",aux:"avoir"},
+{inf:"coûter",group:"er",pattern:"standard",meaning:"to cost",aux:"avoir"},
+{inf:"crier",group:"er",pattern:"standard",meaning:"to shout",aux:"avoir"},
+{inf:"cultiver",group:"er",pattern:"standard",meaning:"to cultivate, to grow",aux:"avoir"},
+{inf:"danser",group:"er",pattern:"standard",meaning:"to dance",aux:"avoir"},
+{inf:"déclarer",group:"er",pattern:"standard",meaning:"to declare",aux:"avoir"},
+{inf:"décorer",group:"er",pattern:"standard",meaning:"to decorate",aux:"avoir"},
+{inf:"dépasser",group:"er",pattern:"standard",meaning:"to exceed, to overtake",aux:"avoir"},
+{inf:"deviner",group:"er",pattern:"standard",meaning:"to guess",aux:"avoir"},
+{inf:"discuter",group:"er",pattern:"standard",meaning:"to discuss",aux:"avoir"},
+{inf:"échouer",group:"er",pattern:"standard",meaning:"to fail",aux:"avoir"},
+{inf:"emporter",group:"er",pattern:"standard",meaning:"to take away",aux:"avoir"},
+{inf:"enterrer",group:"er",pattern:"standard",meaning:"to bury",aux:"avoir"},
+{inf:"entourer",group:"er",pattern:"standard",meaning:"to surround",aux:"avoir"},
+{inf:"garder",group:"er",pattern:"standard",meaning:"to keep, to watch over",aux:"avoir"},
+{inf:"gaspiller",group:"er",pattern:"standard",meaning:"to waste",aux:"avoir"},
+{inf:"griller",group:"er",pattern:"standard",meaning:"to grill, to toast",aux:"avoir"},
+{inf:"grimper",group:"er",pattern:"standard",meaning:"to climb",aux:"avoir"},
+{inf:"guider",group:"er",pattern:"standard",meaning:"to guide",aux:"avoir"},
+{inf:"hésiter",group:"er",pattern:"standard",meaning:"to hesitate",aux:"avoir"},
+{inf:"ignorer",group:"er",pattern:"standard",meaning:"to ignore, to not know",aux:"avoir"},
+{inf:"imiter",group:"er",pattern:"standard",meaning:"to imitate",aux:"avoir"},
+{inf:"importer",group:"er",pattern:"standard",meaning:"to import, to matter",aux:"avoir"},
+{inf:"indiquer",group:"er",pattern:"standard",meaning:"to indicate, to show",aux:"avoir"},
+{inf:"informer",group:"er",pattern:"standard",meaning:"to inform",aux:"avoir"},
+{inf:"inspirer",group:"er",pattern:"standard",meaning:"to inspire",aux:"avoir"},
+{inf:"installer",group:"er",pattern:"standard",meaning:"to install, to set up",aux:"avoir"},
+{inf:"jurer",group:"er",pattern:"standard",meaning:"to swear",aux:"avoir"},
+{inf:"lâcher",group:"er",pattern:"standard",meaning:"to let go, to release",aux:"avoir"},
+{inf:"lutter",group:"er",pattern:"standard",meaning:"to fight, to struggle",aux:"avoir"},
+{inf:"marquer",group:"er",pattern:"standard",meaning:"to mark, to score",aux:"avoir"},
+{inf:"masquer",group:"er",pattern:"standard",meaning:"to hide, to mask",aux:"avoir"},
+{inf:"mesurer",group:"er",pattern:"standard",meaning:"to measure",aux:"avoir"},
+{inf:"naviguer",group:"er",pattern:"standard",meaning:"to navigate, to sail",aux:"avoir"},
+{inf:"nier",group:"er",pattern:"standard",meaning:"to deny",aux:"avoir"},
+{inf:"observer",group:"er",pattern:"standard",meaning:"to observe",aux:"avoir"},
+{inf:"opposer",group:"er",pattern:"standard",meaning:"to oppose",aux:"avoir"},
+{inf:"participer",group:"er",pattern:"standard",meaning:"to participate",aux:"avoir"},
+{inf:"patienter",group:"er",pattern:"standard",meaning:"to wait, to be patient",aux:"avoir"},
+{inf:"peiner",group:"er",pattern:"standard",meaning:"to struggle, to sadden",aux:"avoir"},
+{inf:"plier",group:"er",pattern:"standard",meaning:"to fold",aux:"avoir"},
+{inf:"poser",group:"er",pattern:"standard",meaning:"to place, to put down, to ask (a question)",aux:"avoir"},
+{inf:"préciser",group:"er",pattern:"standard",meaning:"to specify, to clarify",aux:"avoir"},
+{inf:"prier",group:"er",pattern:"standard",meaning:"to pray, to ask",aux:"avoir"},
+{inf:"profiter",group:"er",pattern:"standard",meaning:"to benefit, to take advantage",aux:"avoir"},
+{inf:"programmer",group:"er",pattern:"standard",meaning:"to program, to schedule",aux:"avoir"},
+{inf:"publier",group:"er",pattern:"standard",meaning:"to publish",aux:"avoir"},
+{inf:"raser",group:"er",pattern:"standard",meaning:"to shave",aux:"avoir"},
+{inf:"rassurer",group:"er",pattern:"standard",meaning:"to reassure",aux:"avoir"},
+{inf:"rater",group:"er",pattern:"standard",meaning:"to fail, to miss",aux:"avoir"},
+{inf:"reculer",group:"er",pattern:"standard",meaning:"to back up, to retreat",aux:"avoir"},
+{inf:"regretter",group:"er",pattern:"standard",meaning:"to regret",aux:"avoir"},
+{inf:"remonter",group:"er",pattern:"standard",meaning:"to go back up",aux:"etre"},
+{inf:"réserver",group:"er",pattern:"standard",meaning:"to reserve",aux:"avoir"},
+{inf:"résister",group:"er",pattern:"standard",meaning:"to resist",aux:"avoir"},
+{inf:"respecter",group:"er",pattern:"standard",meaning:"to respect",aux:"avoir"},
+{inf:"ressembler",group:"er",pattern:"standard",meaning:"to resemble",aux:"avoir"},
+{inf:"retarder",group:"er",pattern:"standard",meaning:"to delay",aux:"avoir"},
+{inf:"retirer",group:"er",pattern:"standard",meaning:"to withdraw, to remove",aux:"avoir"},
+{inf:"retrouver",group:"er",pattern:"standard",meaning:"to find again, to meet up with",aux:"avoir"},
+{inf:"risquer",group:"er",pattern:"standard",meaning:"to risk",aux:"avoir"},
+{inf:"rouler",group:"er",pattern:"standard",meaning:"to roll, to drive",aux:"avoir"},
+{inf:"sauter",group:"er",pattern:"standard",meaning:"to jump",aux:"avoir"},
+{inf:"sauver",group:"er",pattern:"standard",meaning:"to save",aux:"avoir"},
+{inf:"séparer",group:"er",pattern:"standard",meaning:"to separate",aux:"avoir"},
+{inf:"signaler",group:"er",pattern:"standard",meaning:"to signal, to report",aux:"avoir"},
+{inf:"simuler",group:"er",pattern:"standard",meaning:"to simulate",aux:"avoir"},
+{inf:"soigner",group:"er",pattern:"standard",meaning:"to take care of, to treat",aux:"avoir"},
+{inf:"souligner",group:"er",pattern:"standard",meaning:"to underline, to emphasize",aux:"avoir"},
+{inf:"supporter",group:"er",pattern:"standard",meaning:"to bear, to support",aux:"avoir"},
+{inf:"supposer",group:"er",pattern:"standard",meaning:"to suppose",aux:"avoir"},
+{inf:"surveiller",group:"er",pattern:"standard",meaning:"to watch over, to supervise",aux:"avoir"},
+{inf:"terminer",group:"er",pattern:"standard",meaning:"to finish, to end",aux:"avoir"},
+{inf:"traiter",group:"er",pattern:"standard",meaning:"to treat, to deal with",aux:"avoir"},
+{inf:"transformer",group:"er",pattern:"standard",meaning:"to transform",aux:"avoir"},
+{inf:"transporter",group:"er",pattern:"standard",meaning:"to transport",aux:"avoir"},
+{inf:"varier",group:"er",pattern:"standard",meaning:"to vary",aux:"avoir"},
+{inf:"vérifier",group:"er",pattern:"standard",meaning:"to verify, to check",aux:"avoir"},
+{inf:"verser",group:"er",pattern:"standard",meaning:"to pour",aux:"avoir"},
+
+// ===== NEW VERBS: 1er groupe irrégulier (spelling-change -er) =====
+{inf:"échanger",group:"er",pattern:"ger",meaning:"to exchange",aux:"avoir"},
+{inf:"diriger",group:"er",pattern:"ger",meaning:"to direct, to manage",aux:"avoir"},
+{inf:"arranger",group:"er",pattern:"ger",meaning:"to arrange",aux:"avoir"},
+{inf:"engager",group:"er",pattern:"ger",meaning:"to hire, to engage",aux:"avoir"},
+{inf:"loger",group:"er",pattern:"ger",meaning:"to house, to live",aux:"avoir"},
+{inf:"encourager",group:"er",pattern:"ger",meaning:"to encourage",aux:"avoir"},
+{inf:"interroger",group:"er",pattern:"ger",meaning:"to question",aux:"avoir"},
+{inf:"négliger",group:"er",pattern:"ger",meaning:"to neglect",aux:"avoir"},
+{inf:"soulager",group:"er",pattern:"ger",meaning:"to relieve",aux:"avoir"},
+{inf:"ménager",group:"er",pattern:"ger",meaning:"to handle carefully, to spare",aux:"avoir"},
+{inf:"allonger",group:"er",pattern:"ger",meaning:"to lengthen, to lie down",aux:"avoir"},
+{inf:"exiger",group:"er",pattern:"ger",meaning:"to require, to demand",aux:"avoir"},
+{inf:"prolonger",group:"er",pattern:"ger",meaning:"to prolong, to extend",aux:"avoir"},
+{inf:"annoncer",group:"er",pattern:"cer",meaning:"to announce",aux:"avoir"},
+{inf:"influencer",group:"er",pattern:"cer",meaning:"to influence",aux:"avoir"},
+{inf:"renoncer",group:"er",pattern:"cer",meaning:"to give up, to renounce",aux:"avoir"},
+{inf:"percer",group:"er",pattern:"cer",meaning:"to pierce",aux:"avoir"},
+{inf:"divorcer",group:"er",pattern:"cer",meaning:"to divorce",aux:"avoir"},
+{inf:"semer",group:"er",pattern:"e_er",meaning:"to sow",aux:"avoir"},
+{inf:"achever",group:"er",pattern:"e_er",meaning:"to complete, to finish off",aux:"avoir"},
+{inf:"congeler",group:"er",pattern:"e_er",meaning:"to freeze (food)",aux:"avoir"},
+{inf:"crever",group:"er",pattern:"e_er",meaning:"to burst, to die (informal)",aux:"avoir"},
+{inf:"élever",group:"er",pattern:"e_er",meaning:"to raise, to bring up",aux:"avoir"},
+{inf:"compléter",group:"er",pattern:"ee_er",meaning:"to complete",aux:"avoir"},
+{inf:"tolérer",group:"er",pattern:"ee_er",meaning:"to tolerate",aux:"avoir"},
+{inf:"gérer",group:"er",pattern:"ee_er",meaning:"to manage",aux:"avoir"},
+{inf:"différer",group:"er",pattern:"ee_er",meaning:"to differ, to postpone",aux:"avoir"},
+{inf:"récupérer",group:"er",pattern:"ee_er",meaning:"to recover, to get back",aux:"avoir"},
+{inf:"sécher",group:"er",pattern:"ee_er",meaning:"to dry",aux:"avoir"},
+{inf:"désespérer",group:"er",pattern:"ee_er",meaning:"to despair",aux:"avoir"},
+{inf:"précéder",group:"er",pattern:"ee_er",meaning:"to precede",aux:"avoir"},
+{inf:"accélérer",group:"er",pattern:"ee_er",meaning:"to accelerate",aux:"avoir"},
+{inf:"renouveler",group:"er",pattern:"eler_dbl",meaning:"to renew",aux:"avoir"},
+{inf:"nettoyer",group:"er",pattern:"yer",meaning:"to clean",aux:"avoir"},
+{inf:"tutoyer",group:"er",pattern:"yer",meaning:"to use \"tu\" with someone",aux:"avoir"},
+{inf:"vouvoyer",group:"er",pattern:"yer",meaning:"to use \"vous\" with someone",aux:"avoir"},
+{inf:"aboyer",group:"er",pattern:"yer",meaning:"to bark",aux:"avoir"},
+{inf:"noyer",group:"er",pattern:"yer",meaning:"to drown",aux:"avoir"},
+{inf:"essayer",group:"er",pattern:"yer",meaning:"to try",aux:"avoir"},
+{inf:"balayer",group:"er",pattern:"yer",meaning:"to sweep",aux:"avoir"},
+
+// ===== NEW VERBS: 2e groupe régulier (-ir, -issons pattern) =====
+{inf:"réagir",group:"ir",meaning:"to react",aux:"avoir"},
+{inf:"atterrir",group:"ir",meaning:"to land (plane)",aux:"avoir"},
+{inf:"applaudir",group:"ir",meaning:"to applaud",aux:"avoir"},
+{inf:"bénir",group:"ir",meaning:"to bless",aux:"avoir"},
+{inf:"bondir",group:"ir",meaning:"to leap",aux:"avoir"},
+{inf:"démolir",group:"ir",meaning:"to demolish",aux:"avoir"},
+{inf:"désobéir",group:"ir",meaning:"to disobey",aux:"avoir"},
+{inf:"divertir",group:"ir",meaning:"to entertain",aux:"avoir"},
+{inf:"élargir",group:"ir",meaning:"to widen, to broaden",aux:"avoir"},
+{inf:"embellir",group:"ir",meaning:"to beautify",aux:"avoir"},
+{inf:"enrichir",group:"ir",meaning:"to enrich",aux:"avoir"},
+{inf:"fournir",group:"ir",meaning:"to supply, to provide",aux:"avoir"},
+{inf:"garantir",group:"ir",meaning:"to guarantee",aux:"avoir"},
+{inf:"gémir",group:"ir",meaning:"to groan, to moan",aux:"avoir"},
+{inf:"jaillir",group:"ir",meaning:"to gush, to spring out",aux:"avoir"},
+{inf:"mincir",group:"ir",meaning:"to slim down",aux:"avoir"},
+{inf:"munir",group:"ir",meaning:"to equip, to provide",aux:"avoir"},
+{inf:"noircir",group:"ir",meaning:"to blacken",aux:"avoir"},
+{inf:"pourrir",group:"ir",meaning:"to rot",aux:"avoir"},
+{inf:"rafraîchir",group:"ir",meaning:"to refresh, to cool",aux:"avoir"},
+{inf:"ravir",group:"ir",meaning:"to delight",aux:"avoir"},
+{inf:"refroidir",group:"ir",meaning:"to cool down",aux:"avoir"},
+{inf:"réunir",group:"ir",meaning:"to gather, to reunite",aux:"avoir"},
+{inf:"rétablir",group:"ir",meaning:"to restore, to reestablish",aux:"avoir"},
+{inf:"rôtir",group:"ir",meaning:"to roast",aux:"avoir"},
+{inf:"rugir",group:"ir",meaning:"to roar",aux:"avoir"},
+{inf:"subir",group:"ir",meaning:"to undergo, to suffer",aux:"avoir"},
+{inf:"surgir",group:"ir",meaning:"to emerge suddenly",aux:"avoir"},
+{inf:"trahir",group:"ir",meaning:"to betray",aux:"avoir"},
+{inf:"verdir",group:"ir",meaning:"to turn green",aux:"avoir"},
+
+// ===== NEW VERBS: 3e groupe régulier (-re, vendre pattern) =====
+{inf:"confondre",group:"re",meaning:"to confuse, to mix up",aux:"avoir"},
+{inf:"correspondre",group:"re",meaning:"to correspond",aux:"avoir"},
+{inf:"suspendre",group:"re",meaning:"to suspend, to hang",aux:"avoir"},
+{inf:"répandre",group:"re",meaning:"to spread, to scatter",aux:"avoir"},
+{inf:"fendre",group:"re",meaning:"to split",aux:"avoir"},
+{inf:"revendre",group:"re",meaning:"to resell",aux:"avoir"},
+{inf:"redescendre",group:"re",meaning:"to go back down",aux:"etre"},
+{inf:"tordre",group:"re",meaning:"to twist",aux:"avoir"},
+{inf:"prétendre",group:"re",meaning:"to claim, to pretend",aux:"avoir"},
+
+// ===== NEW VERBS: 3e groupe irrégulier (verified prefix-compounds) =====
+{inf:"prévenir",group:"irregular",archetype:"venir",prefix:"pré",meaning:"to warn",aux:"avoir"},
+{inf:"intervenir",group:"irregular",archetype:"venir",prefix:"inter",meaning:"to intervene",aux:"etre"},
+{inf:"convenir",group:"irregular",archetype:"venir",prefix:"con",meaning:"to suit, to agree",aux:"avoir"},
+{inf:"parvenir",group:"irregular",archetype:"venir",prefix:"par",meaning:"to reach, to achieve",aux:"etre"},
+{inf:"provenir",group:"irregular",archetype:"venir",prefix:"pro",meaning:"to originate from",aux:"etre"},
+{inf:"survenir",group:"irregular",archetype:"venir",prefix:"sur",meaning:"to occur suddenly",aux:"etre"},
+{inf:"retenir",group:"irregular",archetype:"tenir",prefix:"re",meaning:"to hold back, to remember",aux:"avoir"},
+{inf:"contenir",group:"irregular",archetype:"tenir",prefix:"con",meaning:"to contain",aux:"avoir"},
+{inf:"appartenir",group:"irregular",archetype:"tenir",prefix:"appar",meaning:"to belong",aux:"avoir"},
+{inf:"soutenir",group:"irregular",archetype:"tenir",prefix:"sou",meaning:"to support",aux:"avoir"},
+{inf:"entretenir",group:"irregular",archetype:"tenir",prefix:"entre",meaning:"to maintain",aux:"avoir"},
+{inf:"reprendre",group:"irregular",archetype:"prendre",prefix:"re",meaning:"to resume, to take back",aux:"avoir"},
+{inf:"entreprendre",group:"irregular",archetype:"prendre",prefix:"entre",meaning:"to undertake",aux:"avoir"},
+{inf:"admettre",group:"irregular",archetype:"mettre",prefix:"ad",meaning:"to admit",aux:"avoir"},
+{inf:"soumettre",group:"irregular",archetype:"mettre",prefix:"sou",meaning:"to submit",aux:"avoir"},
+{inf:"transmettre",group:"irregular",archetype:"mettre",prefix:"trans",meaning:"to transmit",aux:"avoir"},
+{inf:"commettre",group:"irregular",archetype:"mettre",prefix:"com",meaning:"to commit",aux:"avoir"},
+{inf:"omettre",group:"irregular",archetype:"mettre",prefix:"o",meaning:"to omit",aux:"avoir"},
+{inf:"compromettre",group:"irregular",archetype:"mettre",prefix:"compro",meaning:"to compromise",aux:"avoir"},
+{inf:"entrevoir",group:"irregular",archetype:"voir",prefix:"entre",meaning:"to glimpse",aux:"avoir"},
+{inf:"redire",group:"irregular",archetype:"dire",prefix:"re",meaning:"to say again",aux:"avoir"},
+{inf:"refaire",group:"irregular",archetype:"faire",prefix:"re",meaning:"to redo, to remake",aux:"avoir"},
+{inf:"satisfaire",group:"irregular",archetype:"faire",prefix:"satis",meaning:"to satisfy",aux:"avoir"},
+{inf:"poursuivre",group:"irregular",archetype:"suivre",prefix:"pour",meaning:"to pursue, to continue",aux:"avoir"},
+{inf:"revivre",group:"irregular",archetype:"vivre",prefix:"re",meaning:"to relive",aux:"avoir"},
+{inf:"survivre",group:"irregular",archetype:"vivre",prefix:"sur",meaning:"to survive",aux:"avoir"},
+{inf:"combattre",group:"irregular",archetype:"battre",prefix:"com",meaning:"to fight, to combat",aux:"avoir"},
+{inf:"abattre",group:"irregular",archetype:"battre",prefix:"a",meaning:"to knock down",aux:"avoir"},
+{inf:"débattre",group:"irregular",archetype:"battre",prefix:"dé",meaning:"to debate",aux:"avoir"},
+{inf:"déplaire",group:"irregular",archetype:"plaire",prefix:"dé",meaning:"to displease",aux:"avoir"},
+{inf:"renvoyer",group:"irregular",archetype:"envoyer",prefix:"r",meaning:"to send back, to dismiss",aux:"avoir"},
+{inf:"rompre",group:"irregular",archetype:"rompre",meaning:"to break, to burst",aux:"avoir"},
+{inf:"interrompre",group:"irregular",archetype:"rompre",prefix:"inter",meaning:"to interrupt",aux:"avoir"},
+{inf:"rejoindre",group:"irregular",archetype:"joindre",prefix:"re",meaning:"to rejoin, to meet up with",aux:"avoir"},
+
+// ===== NEW VERBS: 3e groupe irrégulier (new archetypes) =====
+{inf:"prévoir",group:"irregular",archetype:"prévoir",meaning:"to foresee, to plan",aux:"avoir"},
+{inf:"paraître",group:"irregular",archetype:"paraître",meaning:"to appear, to seem",aux:"avoir"},
+{inf:"apparaître",group:"irregular",archetype:"paraître",prefix:"ap",meaning:"to appear",aux:"avoir"},
+{inf:"disparaître",group:"irregular",archetype:"paraître",prefix:"dis",meaning:"to disappear",aux:"avoir"},
+{inf:"éteindre",group:"irregular",archetype:"éteindre",meaning:"to turn off, to extinguish",aux:"avoir"},
+{inf:"atteindre",group:"irregular",archetype:"atteindre",meaning:"to reach, to attain",aux:"avoir"},
+{inf:"décevoir",group:"irregular",archetype:"décevoir",meaning:"to disappoint",aux:"avoir"},
+
+// ===== NEW VERBS: reflexive (pronominal) =====
+{inf:"brosser",group:"er",pattern:"standard",meaning:"to brush (one's hair/teeth)",aux:"etre",reflexive:true,displayInf:"se brosser"},
+{inf:"raser",group:"er",pattern:"standard",meaning:"to shave (oneself)",aux:"etre",reflexive:true,displayInf:"se raser"},
+{inf:"maquiller",group:"er",pattern:"standard",meaning:"to put on makeup",aux:"etre",reflexive:true,displayInf:"se maquiller"},
+{inf:"peigner",group:"er",pattern:"standard",meaning:"to comb one's hair",aux:"etre",reflexive:true,displayInf:"se peigner"},
+{inf:"doucher",group:"er",pattern:"standard",meaning:"to shower",aux:"etre",reflexive:true,displayInf:"se doucher"},
+{inf:"baigner",group:"er",pattern:"standard",meaning:"to bathe, to swim",aux:"etre",reflexive:true,displayInf:"se baigner"},
+{inf:"déshabiller",group:"er",pattern:"standard",meaning:"to undress",aux:"etre",reflexive:true,displayInf:"se déshabiller"},
+{inf:"endormir",group:"irregular",archetype:"dormir",prefix:"en",meaning:"to fall asleep",aux:"etre",reflexive:true,displayInf:"s'endormir"},
+{inf:"moquer",group:"er",pattern:"standard",meaning:"to make fun of",aux:"etre",reflexive:true,displayInf:"se moquer"},
+{inf:"rappeler",group:"er",pattern:"eler_dbl",meaning:"to remember",aux:"etre",reflexive:true,displayInf:"se rappeler"},
+{inf:"excuser",group:"er",pattern:"standard",meaning:"to apologize",aux:"etre",reflexive:true,displayInf:"s'excuser"},
+{inf:"disputer",group:"er",pattern:"standard",meaning:"to argue",aux:"etre",reflexive:true,displayInf:"se disputer"},
+{inf:"énerver",group:"er",pattern:"standard",meaning:"to get annoyed, to get irritated",aux:"etre",reflexive:true,displayInf:"s'énerver"},
+{inf:"détendre",group:"re",meaning:"to relax",aux:"etre",reflexive:true,displayInf:"se détendre"},
+{inf:"installer",group:"er",pattern:"standard",meaning:"to settle in, to move in",aux:"etre",reflexive:true,displayInf:"s'installer"},
 ];
 
 // Clean up skip placeholders
 const VERBS = VERBS_RAW.filter(v => !v.inf.includes('_skip') && !v.inf.includes('_SKIP'));
+
+// ===== VERB GROUP CATEGORIES =====
+// French verbs are traditionally split into 3 "groupes": 1er (-er, e.g. parler),
+// 2e (-ir with -issons pattern, e.g. finir), and 3e (everything else: irregular -ir
+// like venir/dormir, -re, -oir, and aller). Within each, we also distinguish fully
+// regular verbs from ones with irregularities (spelling-change -er verbs count as
+// "1er groupe irrégulier" here since they deviate from the plain add-the-ending
+// pattern). Reflexive (pronominal) verbs get their own category regardless of group.
+function verbCategory(v){
+  if (v.reflexive) return 'reflexive';
+  if (v.group === 'er') return v.pattern === 'standard' ? 'g1_reg' : 'g1_irreg';
+  if (v.group === 'ir') return 'g2_reg';
+  if (v.group === 're') return 'g3_reg';
+  if (v.group === 'irregular') return 'g3_irreg';
+  return 'other';
+}
+const CATEGORIES = [
+  { id: 'all',       label: 'Tous les verbes' },
+  { id: 'g1_reg',    label: '1er groupe (réguliers)' },
+  { id: 'g1_irreg',  label: '1er groupe (irréguliers)' },
+  { id: 'g2_reg',    label: '2e groupe (réguliers)' },
+  { id: 'g2_irreg',  label: '2e groupe (irréguliers)' },
+  { id: 'g3_reg',    label: '3e groupe (réguliers)' },
+  { id: 'g3_irreg',  label: '3e groupe (irréguliers)' },
+  { id: 'reflexive', label: 'Verbes pronominaux' },
+];
+const VERBS_BY_CATEGORY = { all: VERBS };
+CATEGORIES.forEach(c => { if (c.id !== 'all') VERBS_BY_CATEGORY[c.id] = VERBS.filter(v => verbCategory(v) === c.id); });
+let currentCategory = 'all';
 
 
 
@@ -1779,7 +2171,10 @@ let answered = false;
 let currentAnswer = null; // { main, alt, ambiguous }
 
 function pickRandomVerb() {
-  return VERBS[Math.floor(Math.random() * VERBS.length)];
+  const pool = (VERBS_BY_CATEGORY[currentCategory] && VERBS_BY_CATEGORY[currentCategory].length)
+    ? VERBS_BY_CATEGORY[currentCategory]
+    : VERBS;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 function pickRandomTarget() {
   return Math.floor(Math.random() * 9);
@@ -1918,16 +2313,10 @@ async function saveProgressIfNamed(lastElapsed) {
   const avgTime = questionTimes.reduce((a, b) => a + b, 0) / questionTimes.length;
   const accuracyPct = totalAttempts > 0 ? (100 * totalCorrect / totalAttempts) : 0;
   const score = computeScore(bestStreakSession, accuracyPct, avgTime);
-
-  try {
-    let best = null;
-    try { const ex = await window.storage.get('lb:' + name, true); if (ex) best = JSON.parse(ex.value); } catch(e) {}
-    if (!best || score > best.score) {
-      const record = { name, score, bestStreak: bestStreakSession, accuracy: Math.round(accuracyPct), avgTime: Math.round(avgTime * 10) / 10, updatedAt: Date.now() };
-      await window.storage.set('lb:' + name, JSON.stringify(record), true);
-    }
-  } catch (e) { console.error('Storage write error', e); }
-  refreshLeaderboard();
+  await saveScore(name, score, bestStreakSession, accuracyPct, avgTime);
+  // No need to call refreshLeaderboard() — the real-time listener updates it automatically
+  // when using Firebase. For localStorage fallback we do a manual refresh.
+  if (storageBackend !== 'firebase') startLeaderboardListener();
 }
 
 async function refreshLeaderboard() {
@@ -1957,6 +2346,26 @@ async function refreshLeaderboard() {
 
 function escapeHtml(s) {
   const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+// ===== Verb category selector UI =====
+function renderCategorySelector() {
+  const el = document.getElementById('categorySelector');
+  el.innerHTML = CATEGORIES.map(c => {
+    const count = VERBS_BY_CATEGORY[c.id] ? VERBS_BY_CATEGORY[c.id].length : 0;
+    const disabled = c.id !== 'all' && count === 0;
+    const cls = 'sel-btn' + (c.id === currentCategory ? ' active' : '') + (disabled ? ' disabled' : '');
+    const title = disabled ? ' title="Aucun verbe dans cette catégorie pour le moment"' : '';
+    return '<button class="' + cls + '" data-cat="' + c.id + '"' + title + '>' + c.label + '</button>';
+  }).join('');
+  el.querySelectorAll('button').forEach(btn => {
+    if (btn.classList.contains('disabled')) return;
+    btn.onclick = () => {
+      currentCategory = btn.dataset.cat;
+      renderCategorySelector();
+      newQuestion();
+    };
+  });
 }
 
 // ===== Mood / tense selector UI =====
@@ -2022,21 +2431,22 @@ document.getElementById('playerName').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); startGame(); }
 });
 
+renderCategorySelector();
 renderMoodSelector();
 renderTenseSelector();
 updateStats();
-// The live leaderboard is always shown and refreshed, even before the student starts playing.
+
+// Start the leaderboard — real-time listener if Firebase, otherwise a one-time load
 const lbStatusEl = document.getElementById('lbStatus');
 if (storageBackend === 'firebase') {
-  lbStatusEl.textContent = '🟢 en ligne — partagé entre tous les appareils';
-} else if (storageBackend === 'native') {
-  lbStatusEl.textContent = '🟢 en ligne — partagé';
+  lbStatusEl.textContent = '🟢 en ligne — mis à jour en temps réel';
 } else {
-  lbStatusEl.textContent = '🟡 local à cet appareil (configuration Firebase requise)';
+  lbStatusEl.textContent = '🟡 local à cet appareil (sans connexion internet)';
   lbStatusEl.style.color = 'var(--gold)';
 }
-refreshLeaderboard();
-setInterval(refreshLeaderboard, 15000);
+startLeaderboardListener();
+// For localStorage fallback only: poll every 30s in case multiple tabs are open
+if (storageBackend !== 'firebase') setInterval(startLeaderboardListener, 30000);
 
 </script>
 </body>
