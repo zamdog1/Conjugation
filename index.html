@@ -1880,7 +1880,6 @@ const CATEGORIES = [
   { id: 'g1_reg',    label: '1er groupe (réguliers)' },
   { id: 'g1_irreg',  label: '1er groupe (irréguliers)' },
   { id: 'g2_reg',    label: '2e groupe (réguliers)' },
-  { id: 'g2_irreg',  label: '2e groupe (irréguliers)' },
   { id: 'g3_reg',    label: '3e groupe (réguliers)' },
   { id: 'g3_irreg',  label: '3e groupe (irréguliers)' },
   { id: 'reflexive', label: 'Verbes pronominaux' },
@@ -2355,7 +2354,7 @@ function renderCategorySelector() {
     const count = VERBS_BY_CATEGORY[c.id] ? VERBS_BY_CATEGORY[c.id].length : 0;
     const disabled = c.id !== 'all' && count === 0;
     const cls = 'sel-btn' + (c.id === currentCategory ? ' active' : '') + (disabled ? ' disabled' : '');
-    const title = disabled ? ' title="Aucun verbe dans cette catégorie pour le moment"' : '';
+    const title = disabled ? ' title="Aucun verbe dans cette catégorie"' : '';
     return '<button class="' + cls + '" data-cat="' + c.id + '"' + title + '>' + c.label + '</button>';
   }).join('');
   el.querySelectorAll('button').forEach(btn => {
