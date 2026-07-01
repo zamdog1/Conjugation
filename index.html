@@ -1107,6 +1107,55 @@ delete IRREGULAR.voir2_apercevoir;
 
 
 // ============================================================
+// PARTICIPES — invariable single forms (not 6-person arrays)
+// ============================================================
+// Participe présent: formed from the nous-present stem + -ant
+//   parler -> parlons -> parl- -> parlant
+//   finir  -> finissons -> finiss- -> finissant
+//   vendre -> vendons -> vend- -> vendant
+//   être   -> étant (irregular)
+//   avoir  -> ayant (irregular)
+// For irregular verbs: use the imparfait stem (= nous-present stem) + ant,
+// unless a specific participePres is defined in the archetype.
+
+function getParticiipePresent(verbEntry) {
+  const arc = verbEntry.group === 'irregular' ? IRREGULAR[verbEntry.archetype] : null;
+  // If archetype explicitly sets participePres (including null = skip this verb)
+  if (arc && 'participePres' in arc) {
+    if (arc.participePres === null) return null;
+    return (verbEntry.prefix || '') + arc.participePres;
+  }
+  // General rule: imparfait stem (= nous-present stem) + ant
+  if (arc) {
+    if (!arc.imparfaitStem) return null;
+    return (verbEntry.prefix || '') + arc.imparfaitStem + 'ant';
+  }
+  if (verbEntry.group === 'er') {
+    const radical = verbEntry.inf.slice(0,-2);
+    const pattern = verbEntry.pattern || 'standard';
+    let stem;
+    if (pattern === 'ger' || pattern === 'eger') stem = radical + 'e';
+    else if (pattern === 'cer') stem = radical.slice(0,-1) + 'ç';
+    else stem = radical;
+    return stem + 'ant';
+  }
+  if (verbEntry.group === 'ir') return verbEntry.inf.slice(0,-2) + 'issant';
+  if (verbEntry.group === 're') return verbEntry.inf.slice(0,-2) + 'ant';
+  return null;
+}
+
+// Participe passé: already computed by getPastParticiple()
+// but for the quiz we expose it as a single invariable masculine singular form.
+// Agreement forms (parlée, parlés, parlées) are not quizzed here — only the base form.
+
+// Add participe présent overrides for être and avoir (and a few common irregulars)
+// These are added directly to their archetype entries below:
+IRREGULAR.etre.participePres = 'étant';
+IRREGULAR.avoir.participePres = 'ayant';
+IRREGULAR.savoir.participePres = 'sachant'; // sachant (not savant!)
+IRREGULAR.pouvoir.participePres = null; // "pouvant" exists but is literary/rare — skip
+
+// ============================================================
 // MASTER CONJUGATOR — combines regular rules + irregular tables
 // Handles reflexive pronoun logic and compound tenses
 // ============================================================
@@ -1926,6 +1975,13 @@ const MOODS = {
       imperatif: 'Impératif présent',
     }
   },
+  participe: {
+    label: 'Participes',
+    tenses: {
+      participePres: 'Participe présent',
+      participePasse: 'Participe passé',
+    }
+  },
 };
 
 // 9 distinct quiz targets
@@ -1951,6 +2007,22 @@ function getAnswer(verb, tense, targetIdx) {
   const gender = TARGET_GENDER[targetIdx]; // null = ambiguous
 
   const subjLabel = SUBJ_DISPLAY[targetIdx];
+
+  // ---- Participes: invariable single form, shown once regardless of target ----
+  // We only return an answer for targetIdx 0 (the first "slot") to avoid
+  // asking the same question 9 times. For all other targets, return null.
+  if (tense === 'participePres') {
+    if (targetIdx !== 0) return null;
+    const form = getParticiipePresent(verb);
+    if (!form) return null;
+    return { main: form, alt: null, ambiguous: false, subjLabel: '' };
+  }
+  if (tense === 'participePasse') {
+    if (targetIdx !== 0) return null;
+    const form = getPastParticiple(verb);
+    if (!form) return null;
+    return { main: form, alt: null, ambiguous: false, subjLabel: '' };
+  }
 
   // ---- Impératif: tu/nous/vous only ----
   if (tense === 'imperatif') {
@@ -2150,6 +2222,8 @@ function translateAnswer(verb, mood, tense, targetIdx){
       case 'subjonctif.subjPresent': return 'that ' + pLower + ' ' + base;
       case 'subjonctif.subjonctifPasse': return 'that ' + pLower + ' have ' + pastParticipleEN(base);
       case 'imperatif.imperatif': return base.charAt(0).toUpperCase() + base.slice(1) + '!';
+      case 'participe.participePres': return gerundEN(base) + ' (present participle)';
+      case 'participe.participePasse': return pastParticipleEN(base) + ' (past participle)';
       default: return p + ' ' + base;
     }
   } catch (e) {
@@ -2213,11 +2287,14 @@ function newQuestion() {
   let hint = '';
   if (answer.ambiguous) hint = '(masculin ou féminin accepté)';
   else if (currentTense === 'imperatif') hint = '(impératif — pas de sujet)';
+  else if (currentTense === 'participePres') hint = '(participe présent — invariable)';
+  else if (currentTense === 'participePasse') hint = '(participe passé — forme de base)';
   document.getElementById('pcHint').textContent = hint;
 
-  // For imperatif, grey out the pronoun display (no subject used)
+  // For imperatif and participes, grey out the pronoun display (no subject used)
   const pronounEl = document.getElementById('pronounDisplay');
-  if (currentTense === 'imperatif') {
+  const isNoSubject = (currentTense === 'imperatif' || currentTense === 'participePres' || currentTense === 'participePasse');
+  if (isNoSubject) {
     pronounEl.style.opacity = '0.35';
     pronounEl.style.textDecoration = 'line-through';
   } else {
@@ -2316,31 +2393,6 @@ async function saveProgressIfNamed(lastElapsed) {
   // No need to call refreshLeaderboard() — the real-time listener updates it automatically
   // when using Firebase. For localStorage fallback we do a manual refresh.
   if (storageBackend !== 'firebase') startLeaderboardListener();
-}
-
-async function refreshLeaderboard() {
-  const listEl = document.getElementById('leaderboardList');
-  try {
-    const keys = await window.storage.list('lb:', true);
-    if (!keys || !keys.keys || keys.keys.length === 0) {
-      listEl.innerHTML = '<div class="empty-lb">Aucun score pour l\'instant — soyez le premier !</div>';
-      return;
-    }
-    const records = [];
-    for (const k of keys.keys) {
-      try { const r = await window.storage.get(k.key || k, true); if (r) records.push(JSON.parse(r.value)); } catch(e) {}
-    }
-    records.sort((a, b) => b.score - a.score);
-    const top = records.slice(0, 10);
-    listEl.innerHTML = top.map((r, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
-      return '<div class="lb-row"><div class="lb-rank">' + medal + '</div><div class="lb-name">' + escapeHtml(r.name) + '<div class="lb-meta">série ' + r.bestStreak + ' · ' + r.accuracy + '% · ' + r.avgTime + 's/q</div></div><div class="lb-score">' + r.score + '</div></div>';
-    }).join('');
-  } catch (e) {
-    console.error('Leaderboard refresh error', e);
-    listEl.innerHTML = '<div class="empty-lb">Connexion au classement...</div>';
-    setTimeout(refreshLeaderboard, 2000);
-  }
 }
 
 function escapeHtml(s) {
