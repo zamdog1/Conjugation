@@ -110,6 +110,18 @@ body{
 .sel-btn.disabled{opacity:0.3;cursor:not-allowed;}
 .sel-btn.disabled:hover{background:rgba(247,243,233,0.07);}
 .category-label{font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(247,243,233,0.5);margin:0 0 6px 2px;}
+.custom-verb-row{display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center;}
+.custom-verb-row input{
+  background:rgba(247,243,233,0.08);border:1px solid rgba(247,243,233,0.25);
+  border-radius:8px;padding:8px 12px;color:var(--parchment);font-size:14px;min-width:200px;outline:none;
+}
+.custom-verb-row input:focus{border-color:var(--coral);}
+.custom-chip{
+  background:var(--coral);color:#fff;border-radius:16px;padding:6px 12px;font-size:13px;
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+}
+.custom-chip:hover{background:var(--coral-light);}
+.custom-verb-msg{font-size:12px;color:var(--gold);min-height:16px;margin:0 0 12px 2px;}
 
 .card{
   background:var(--parchment);
@@ -269,6 +281,13 @@ body{
 
     <div class="category-label">Groupe de verbes</div>
     <div class="selector-row" id="categorySelector"></div>
+    <div class="category-label">Ou pratiquez un verbe de votre choix</div>
+    <div class="custom-verb-row">
+      <input id="customVerbInput" type="text" placeholder="ex : parler, finir, se laver..." maxlength="30"/>
+      <button class="btn btn-secondary" id="customVerbBtn">Pratiquer ce verbe</button>
+      <span class="custom-chip" id="customVerbChip" style="display:none;"></span>
+    </div>
+    <div class="custom-verb-msg" id="customVerbMsg"></div>
     <div class="selector-row" id="moodSelector"></div>
     <div class="selector-row" id="tenseSelector"></div>
 
@@ -1410,14 +1429,15 @@ function subjonctifPasse(verbEntry, personIndex, gender){
 // Impératif présent: only tu(0)/nous(1)/vous(2) — maps to personIndex 1,3,4 in normal scheme
 // We expose imperatifIdx: 0=tu, 1=nous, 2=vous
 function imperatif(verbEntry, imperatifIdx){
+  let base = null;
   if(verbEntry.group==='irregular'){
     const arc = IRREGULAR[verbEntry.archetype];
     if(!arc || !arc.impv) return null;
     if(arc.impv[imperatifIdx]===null) return null;
     const prefix = verbEntry.prefix || '';
-    return prefix + arc.impv[imperatifIdx];
+    base = prefix + arc.impv[imperatifIdx];
   }
-  if(verbEntry.group==='er'){
+  else if(verbEntry.group==='er'){
     // regular -er: tu=parle(no s), nous=parlons, vous=parlez
     // Must reuse erStem() so spelling-change patterns (e_er, ee_er, eler_dbl,
     // eter_dbl, yer, ger, cer, ...) apply here too — e.g. "considérer" -> tu
@@ -1426,19 +1446,26 @@ function imperatif(verbEntry, imperatifIdx){
     const i = personMap[imperatifIdx];
     const stem = erStem(verbEntry.inf, verbEntry.pattern, i);
     const ends = ['e','ons','ez'];
-    return stem + ends[imperatifIdx];
+    base = stem + ends[imperatifIdx];
   }
-  if(verbEntry.group==='ir'){
+  else if(verbEntry.group==='ir'){
     const radical = verbEntry.inf.slice(0,-2);
     const ends = ['is','issons','issez'];
-    return radical + ends[imperatifIdx];
+    base = radical + ends[imperatifIdx];
   }
-  if(verbEntry.group==='re'){
+  else if(verbEntry.group==='re'){
     const radical = verbEntry.inf.slice(0,-2);
     const ends = ['s','ons','ez'];
-    return radical + ends[imperatifIdx];
+    base = radical + ends[imperatifIdx];
   }
-  return null;
+  if(base === null) return null;
+  // Reflexive verbs: affirmative imperative attaches the stressed pronoun with a
+  // hyphen — lève-toi, levons-nous, levez-vous.
+  if(verbEntry.reflexive){
+    const pron = ['-toi','-nous','-vous'][imperatifIdx];
+    return base + pron;
+  }
+  return base;
 }
 
 function fullPasseCompose(verbEntry, personIndex, gender, subjOverride){
@@ -2652,7 +2679,75 @@ let questionStartTime = null;
 let answered = false;
 let currentAnswer = null; // { main, alt, ambiguous }
 
+// ===== CUSTOM VERB PRACTICE =====
+// The student can type any verb; we first look it up in the 800+ database, and if
+// absent we auto-classify it: -er with spelling-change detection, -ir as 2e groupe,
+// -re as vendre-pattern. Unknown irregulars not in the database are rejected rather
+// than guessed, so no wrong forms are ever taught.
+let customVerb = null;
+
+function detectErPattern(inf){
+  const r = inf.slice(0,-2); // radical
+  if (/éger$/.test(inf)) return 'eger';           // protéger-type
+  if (/ger$/.test(inf)) return 'ger';             // manger-type
+  if (/cer$/.test(inf)) return 'cer';             // commencer-type
+  if (/[ou]yer$/.test(inf)) return 'yer';         // employer/essuyer-type (y->i)
+  if (/ayer$/.test(inf)) return 'yer';            // payer-type (taught i-form)
+  if (/eler$/.test(inf)) return 'eler_dbl';       // appeler-type (default; geler-types are in DB)
+  if (/eter$/.test(inf)) return 'eter_dbl';       // jeter-type (acheter-types are in DB)
+  if (/é[^aeiouéèê]+er$/.test(inf)) return 'ee_er'; // préférer/sécher-type
+  if (/e[^aeiouéèê]+er$/.test(inf) && !/eer$/.test(inf)) return 'e_er'; // lever/mener-type
+  return 'standard';
+}
+
+function findOrBuildVerb(raw){
+  let input = (raw||'').trim().toLowerCase().replace(/\u2019/g,"'");
+  if (!input) return { error: 'Entrez un verbe à l\'infinitif.' };
+  // Reflexive prefix handling: "se laver" / "s'appeler"
+  let wantReflexive = false;
+  if (/^se\s+/.test(input)) { wantReflexive = true; input = input.replace(/^se\s+/,''); }
+  else if (/^s'/.test(input)) { wantReflexive = true; input = input.replace(/^s'/,''); }
+  if (!/^[a-zàâäéèêëîïôöùûüçœ-]+$/.test(input)) return { error: 'Verbe non valide.' };
+
+  // 1) Database lookup (prefer exact reflexive match)
+  let v = VERBS.find(x => x.inf === input && !!x.reflexive === wantReflexive);
+  if (!v && wantReflexive) v = VERBS.find(x => x.inf === input && x.reflexive);
+  if (!v && !wantReflexive) v = VERBS.find(x => x.inf === input);
+  if (v) return { verb: v };
+
+  // 2) Auto-classify unknown regular verbs
+  if (input.endsWith('er') && input.length > 3) {
+    const entry = { inf: input, group: 'er', pattern: detectErPattern(input), meaning: '', aux: wantReflexive ? 'etre' : 'avoir' };
+    if (wantReflexive) { entry.reflexive = true; entry.displayInf = (/^[aeiouhâàéèêëîïôöûü]/.test(input) ? "s'" : 'se ') + input; }
+    return { verb: entry, note: 'Verbe hors liste — traité comme 1er groupe' + (entry.pattern !== 'standard' ? ' (' + entry.pattern + ')' : '') + '.' };
+  }
+  if (input.endsWith('ir') && input.length > 3) {
+    const entry = { inf: input, group: 'ir', meaning: '', aux: wantReflexive ? 'etre' : 'avoir' };
+    if (wantReflexive) { entry.reflexive = true; entry.displayInf = (/^[aeiouhâàéèêëîïôöûü]/.test(input) ? "s'" : 'se ') + input; }
+    return { verb: entry, note: 'Verbe hors liste — traité comme 2e groupe (-issons). Vérifiez qu\'il n\'est pas du 3e groupe.' };
+  }
+  if (input.endsWith('re') && input.length > 3) {
+    const entry = { inf: input, group: 're', meaning: '', aux: wantReflexive ? 'etre' : 'avoir' };
+    if (wantReflexive) { entry.reflexive = true; entry.displayInf = (/^[aeiouhâàéèêëîïôöûü]/.test(input) ? "s'" : 'se ') + input; }
+    return { verb: entry, note: 'Verbe hors liste — traité comme 3e groupe régulier (type vendre).' };
+  }
+  return { error: 'Ce verbe irrégulier n\'est pas dans la base — impossible de garantir des formes exactes.' };
+}
+
+function setCustomVerb(entry){
+  customVerb = entry;
+  const chip = document.getElementById('customVerbChip');
+  if (entry) {
+    chip.textContent = (entry.displayInf || entry.inf) + '  ✕';
+    chip.style.display = 'inline-flex';
+    document.getElementById('customVerbInput').value = '';
+  } else {
+    chip.style.display = 'none';
+  }
+}
+
 function pickRandomVerb() {
+  if (customVerb) return customVerb;
   const pool = (VERBS_BY_CATEGORY[currentCategory] && VERBS_BY_CATEGORY[currentCategory].length)
     ? VERBS_BY_CATEGORY[currentCategory]
     : VERBS;
@@ -2822,6 +2917,8 @@ function renderCategorySelector() {
     if (btn.classList.contains('disabled')) return;
     btn.onclick = () => {
       currentCategory = btn.dataset.cat;
+      setCustomVerb(null);
+      document.getElementById('customVerbMsg').textContent = '';
       renderCategorySelector();
       newQuestion();
     };
@@ -2865,7 +2962,39 @@ document.getElementById('skipBtn').onclick = () => { streak = 0; updateStats(); 
 document.getElementById('answerInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { if (answered) { newQuestion(); } else { checkAnswer(); } }
 });
+// After a wrong answer the input is disabled, so its keydown listener can't fire.
+// This document-level fallback lets Enter advance to the next question in that state.
+// e.target check: the Enter that SUBMITS the answer originates from the input (which
+// handles it itself) and would otherwise bubble here after checkAnswer() disables the
+// input, instantly skipping past the correction. Only handle Enter from elsewhere.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && answered && gameStarted
+      && e.target !== document.getElementById('answerInput')
+      && document.getElementById('answerInput').disabled) {
+    newQuestion();
+  }
+});
 document.getElementById('playerName').addEventListener('change', refreshLeaderboard);
+
+// Custom verb practice wiring
+function activateCustomVerb(){
+  const raw = document.getElementById('customVerbInput').value;
+  const msgEl = document.getElementById('customVerbMsg');
+  const res = findOrBuildVerb(raw);
+  if (res.error) { msgEl.textContent = '⚠️ ' + res.error; return; }
+  msgEl.textContent = res.note ? 'ℹ️ ' + res.note : '';
+  setCustomVerb(res.verb);
+  if (gameStarted) newQuestion();
+}
+document.getElementById('customVerbBtn').onclick = activateCustomVerb;
+document.getElementById('customVerbInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); activateCustomVerb(); }
+});
+document.getElementById('customVerbChip').onclick = () => {
+  setCustomVerb(null);
+  document.getElementById('customVerbMsg').textContent = '';
+  if (gameStarted) newQuestion();
+};
 
 // ===== Name-first gating: the student must enter a name before the verb tabs / game appear =====
 let gameStarted = false;
