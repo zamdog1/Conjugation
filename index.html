@@ -398,7 +398,7 @@ async function saveScore(name, score, bestStreak, accuracyPct, avgTime) {
       const existing = localStorage.getItem(key);
       const best = existing ? JSON.parse(existing) : null;
       if (!best || score > best.score) {
-        localStorage.setItem(key, JSON.stringify({ name, score, bestStreak, accuracy: Math.round(accuracyPct), avgTime: Math.round(avgTime * 10) / 10 }));
+        localStorage.setItem(key, JSON.stringify({ name, score, bestStreak, accuracy: Math.round(accuracyPct), avgTime: Math.round(avgTime * 10) / 10, updatedAt: Date.now() }));
       }
     } catch(e) {}
   }
@@ -411,11 +411,11 @@ function startLeaderboardListener() {
     // No orderBy here — that would require a Firestore index to be manually created.
     // Instead we fetch all records and sort in JS. Works instantly with zero setup.
     lbUnsubscribe = db.collection(FIRESTORE_COLLECTION)
-      .limit(200)
+      .limit(1000)
       .onSnapshot(snap => {
         const records = snap.docs.map(d => d.data())
           .sort((a, b) => (b.score || 0) - (a.score || 0))
-          .slice(0, 10);
+          .slice(0, 20);
         renderLeaderboard(records);
       }, err => {
         console.error('Leaderboard listener error:', err);
@@ -428,10 +428,24 @@ function startLeaderboardListener() {
         .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e) { return null; } })
         .filter(Boolean)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 10);
+        .slice(0, 20);
       renderLeaderboard(records);
     } catch(e) { renderLeaderboard(null); }
   }
+}
+
+// Formats the score date for the leaderboard. Handles both Firestore Timestamp
+// objects (which have .toDate()) and plain millisecond numbers (localStorage mode).
+function formatLbDate(ts) {
+  try {
+    let d = null;
+    if (!ts) return '';
+    if (typeof ts.toDate === 'function') d = ts.toDate();
+    else if (typeof ts === 'number') d = new Date(ts);
+    else if (ts.seconds) d = new Date(ts.seconds * 1000);
+    if (!d || isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch (e) { return ''; }
 }
 
 function renderLeaderboard(records) {
@@ -445,7 +459,7 @@ function renderLeaderboard(records) {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
     return '<div class="lb-row"><div class="lb-rank">' + medal + '</div>' +
       '<div class="lb-name">' + escapeHtml(r.name || '?') +
-      '<div class="lb-meta">série ' + (r.bestStreak||0) + ' · ' + (r.accuracy||0) + '% · ' + (r.avgTime||0) + 's/q</div></div>' +
+      '<div class="lb-meta">série ' + (r.bestStreak||0) + ' · ' + (r.accuracy||0) + '% · ' + (r.avgTime||0) + 's/q' + (formatLbDate(r.updatedAt) ? ' · ' + formatLbDate(r.updatedAt) : '') + '</div></div>' +
       '<div class="lb-score">' + (r.score||0) + '</div></div>';
   }).join('');
 }
